@@ -300,3 +300,7 @@ Bun + Turborepo. Reasons in [ARCHITECTURE.md](./ARCHITECTURE.md).
 ## License
 
 [MIT](./LICENSE).
+
+Test synchronisation Cursor GitHub - 15.10.2026
+
+Test synchronisation Cursor GitHub - 15.10.2026
