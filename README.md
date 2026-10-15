@@ -301,12 +301,16 @@ bootstrap to the existing instance. Increment `BootstrapVersion` whenever you
 want CloudFormation to force that bootstrap to run again.
 
 The first deployment builds the Next.js image on the instance and can take
-several minutes. CloudFormation waits up to 30 minutes for the bootstrap.
+several minutes. The bootstrap runs as a systemd unit so a slow image build does
+not roll the whole CloudFormation stack back; the deployment timer retries a
+failed build automatically.
 
 To inspect a deployment, connect with Session Manager and run:
 
 ```sh
 sudo systemctl status innolab-deploy.service
+sudo systemctl status innolab-bootstrap.service
+sudo journalctl -u innolab-bootstrap.service -n 200 --no-pager
 sudo journalctl -u innolab-deploy.service -n 200 --no-pager
 cd /opt/innolab
 sudo docker compose --env-file /etc/innolab/runtime.env \

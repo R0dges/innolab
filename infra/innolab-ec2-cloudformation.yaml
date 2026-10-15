@@ -43,7 +43,7 @@ Parameters:
     Description: Docker Compose release installed on the host
   BootstrapVersion:
     Type: String
-    Default: "1"
+    Default: "2"
     AllowedPattern: ^[0-9]+$
     Description: Increment this value to force Systems Manager to rerun bootstrap
 
@@ -423,13 +423,18 @@ Resources:
         - Key: InstanceIds
           Values:
             - !Ref InnolabInstance
-      WaitForSuccessTimeoutSeconds: 1800
       Parameters:
         commands:
           - !Sub |
               set -euo pipefail
               echo "Applying Innolab bootstrap version ${BootstrapVersion}"
-              dnf install -y curl
+              if ! command -v curl >/dev/null 2>&1; then
+                for attempt in $(seq 1 30); do
+                  dnf install -y curl && break
+                  sleep 10
+                done
+              fi
+              command -v curl >/dev/null 2>&1
               token=$(curl -fsS -X PUT \
                 -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
                 http://169.254.169.254/latest/api/token)
@@ -439,7 +444,13 @@ Resources:
                 http://169.254.169.254/latest/user-data \
                 -o /var/lib/innolab/bootstrap.sh
               chmod 0700 /var/lib/innolab/bootstrap.sh
-              /bin/bash /var/lib/innolab/bootstrap.sh
+              if ! systemctl is-active --quiet innolab-bootstrap.service; then
+                systemctl reset-failed innolab-bootstrap.service 2>/dev/null || true
+                systemd-run \
+                  --unit=innolab-bootstrap \
+                  --collect \
+                  /bin/bash /var/lib/innolab/bootstrap.sh
+              fi
 
 Outputs:
   InstanceId:
