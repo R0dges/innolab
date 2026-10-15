@@ -1,0 +1,464 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Innolab MVP on one Amazon Linux 2023 EC2 instance. Installs Docker Compose,
+  deploys the public GitHub repository, serves it through Caddy, and checks the
+  selected branch for updates every minute. Administration uses SSM Session
+  Manager; no inbound SSH is allowed.
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: c7i-flex.large
+    Description: 4 GiB RAM is recommended for the Next.js Docker build.
+    AllowedValues:
+      - c7i-flex.large
+      - t3.small
+      - t3.medium
+      - m7i-flex.large
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Current AWS-managed x86_64 Amazon Linux 2023 image
+  RepositoryUrl:
+    Type: String
+    Default: https://github.com/R0dges/innolab.git
+    AllowedPattern: ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$
+    Description: Public GitHub repository cloned by the instance
+  DeployBranch:
+    Type: String
+    Default: main
+    AllowedPattern: ^[A-Za-z0-9._/-]+$
+    Description: Branch checked for updates every minute
+  DomainName:
+    Type: String
+    Default: ""
+    AllowedPattern: ^$|^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$
+    Description: >-
+      Optional DNS name whose A record points to the stack Elastic IP. Leave
+      empty to serve over HTTP on the Elastic IP; set it to enable automatic HTTPS.
+  DockerComposeVersion:
+    Type: String
+    Default: v5.6.0
+    AllowedPattern: ^v[0-9]+\.[0-9]+\.[0-9]+$
+    Description: Docker Compose release installed on the host
+  BootstrapVersion:
+    Type: String
+    Default: "1"
+    AllowedPattern: ^[0-9]+$
+    Description: Increment this value to force Systems Manager to rerun bootstrap
+
+Conditions:
+  HasDomainName: !Not [!Equals [!Ref DomainName, ""]]
+
+Resources:
+  InnolabVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.77.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: innolab-mvp-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: innolab-mvp-igw
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref InnolabVpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref InnolabVpc
+      CidrBlock: 10.77.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: innolab-mvp-public-subnet
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref InnolabVpc
+      Tags:
+        - Key: Name
+          Value: innolab-mvp-public-rt
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Innolab HTTP and HTTPS only; no inbound SSH or database
+      VpcId: !Ref InnolabVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access, HTTPS redirect, and certificate challenges
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS access
+        - IpProtocol: udp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTP/3 access
+      Tags:
+        - Key: Name
+          Value: innolab-mvp-web-sg
+
+  SessionManagerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  SessionManagerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref SessionManagerRole
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: innolab-mvp-ip
+
+  InnolabInstance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - InternetRoute
+      - SubnetRouteAssociation
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref WebSecurityGroup
+      IamInstanceProfile: !Ref SessionManagerInstanceProfile
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        InstanceMetadataTags: enabled
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            Encrypted: true
+            VolumeSize: 30
+            VolumeType: gp3
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64:
+          !Sub
+            - |
+              #!/bin/bash
+              set -euxo pipefail
+
+              install -d -m 0755 /run/lock
+              exec 8>/run/lock/innolab-bootstrap.lock
+              flock 8
+
+              dnf install -y docker git curl openssl
+              systemctl enable --now docker
+              systemctl enable --now amazon-ssm-agent || true
+
+              install -d -m 0755 /usr/local/lib/docker/cli-plugins
+              compose_asset=docker-compose-linux-x86_64
+              curl -fsSLO "https://github.com/docker/compose/releases/download/${DockerComposeVersion}/$compose_asset"
+              curl -fsSLO "https://github.com/docker/compose/releases/download/${DockerComposeVersion}/$compose_asset.sha256"
+              sha256sum -c "$compose_asset.sha256"
+              install -m 0755 "$compose_asset" /usr/local/lib/docker/cli-plugins/docker-compose
+              rm -f "$compose_asset" "$compose_asset.sha256"
+              docker compose version
+
+              install -d -m 0700 /etc/innolab
+              install -d -m 0755 /var/lib/innolab
+
+              if [ ! -s /etc/innolab/secrets.env ]; then
+                umask 077
+                auth_secret=$(openssl rand -base64 48 | tr -d '\n')
+                postgres_password=$(openssl rand -hex 32)
+                cat > /etc/innolab/secrets.env <<EOF
+              BETTER_AUTH_SECRET=$auth_secret
+              POSTGRES_PASSWORD=$postgres_password
+              EOF
+              fi
+
+              cat > /etc/innolab/deployment.env <<EOF
+              REPOSITORY_URL=${RepositoryUrl}
+              DEPLOY_BRANCH=${DeployBranch}
+              PUBLIC_URL=${ResolvedPublicUrl}
+              SITE_ADDRESS=${ResolvedSiteAddress}
+              TRUSTED_ORIGINS=${ResolvedPublicUrl}
+              POSTGRES_USER=juryza
+              POSTGRES_DB=juryza
+              PORTAL_BIND_ADDRESS=127.0.0.1
+              PORTAL_PORT=8080
+              EOF
+              cat /etc/innolab/deployment.env /etc/innolab/secrets.env > /etc/innolab/runtime.env
+              chmod 0600 /etc/innolab/runtime.env /etc/innolab/secrets.env
+
+              cat > /etc/innolab/Caddyfile <<'EOF'
+              {$SITE_ADDRESS} {
+                encode zstd gzip
+                reverse_proxy 127.0.0.1:8080
+              }
+              EOF
+
+              cat > /etc/innolab/docker-compose.ec2.yml <<'EOF'
+              services:
+                db:
+                  restart: unless-stopped
+                  environment:
+                    POSTGRES_USER: ${!POSTGRES_USER}
+                    POSTGRES_PASSWORD: ${!POSTGRES_PASSWORD}
+                    POSTGRES_DB: ${!POSTGRES_DB}
+
+                portal:
+                  restart: unless-stopped
+                  environment:
+                    DATABASE_URL: postgres://${!POSTGRES_USER}:${!POSTGRES_PASSWORD}@db:5432/${!POSTGRES_DB}
+                    BETTER_AUTH_SECRET: ${!BETTER_AUTH_SECRET}
+                    BETTER_AUTH_URL: ${!PUBLIC_URL}
+                    PORTAL_BASE_URL: ${!PUBLIC_URL}
+                    TRUSTED_ORIGINS: ${!TRUSTED_ORIGINS}
+                    NODE_ENV: production
+
+                proxy:
+                  image: caddy:2-alpine
+                  restart: unless-stopped
+                  network_mode: host
+                  depends_on:
+                    portal:
+                      condition: service_healthy
+                  environment:
+                    SITE_ADDRESS: ${!SITE_ADDRESS}
+                  volumes:
+                    - /etc/innolab/Caddyfile:/etc/caddy/Caddyfile:ro
+                    - caddy-data:/data
+                    - caddy-config:/config
+
+              volumes:
+                caddy-data:
+                caddy-config:
+              EOF
+
+              cat > /usr/local/sbin/innolab-deploy <<'EOF'
+              #!/bin/bash
+              set -euo pipefail
+
+              exec 9>/run/lock/innolab-deploy.lock
+              flock -n 9 || exit 0
+
+              source /etc/innolab/runtime.env
+              repo_dir=/opt/innolab
+              state_file=/var/lib/innolab/deployed-state
+
+              metadata_token=$(curl -fsS -X PUT \
+                -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
+                http://169.254.169.254/latest/api/token || true)
+              metadata_tag() {
+                if [ -z "$metadata_token" ]; then
+                  return 0
+                fi
+                curl -fsS \
+                  -H "X-aws-ec2-metadata-token: $metadata_token" \
+                  "http://169.254.169.254/latest/meta-data/tags/instance/$1" || true
+              }
+
+              tag_repository_url=$(metadata_tag RepositoryUrl)
+              tag_deploy_branch=$(metadata_tag DeployBranch)
+              tag_public_url=$(metadata_tag PublicUrl)
+              tag_site_address=$(metadata_tag SiteAddress)
+              REPOSITORY_URL=${!tag_repository_url:-$REPOSITORY_URL}
+              DEPLOY_BRANCH=${!tag_deploy_branch:-$DEPLOY_BRANCH}
+              PUBLIC_URL=${!tag_public_url:-$PUBLIC_URL}
+              SITE_ADDRESS=${!tag_site_address:-$SITE_ADDRESS}
+              TRUSTED_ORIGINS=$PUBLIC_URL
+              export REPOSITORY_URL DEPLOY_BRANCH PUBLIC_URL SITE_ADDRESS TRUSTED_ORIGINS
+
+              if [ ! -d "$repo_dir/.git" ]; then
+                if [ -e "$repo_dir" ]; then
+                  mv "$repo_dir" "$repo_dir.bootstrap-backup-$(date +%s)"
+                fi
+                git clone --branch "$DEPLOY_BRANCH" --single-branch "$REPOSITORY_URL" "$repo_dir"
+              fi
+
+              cd "$repo_dir"
+              if [ "$(pwd -P)" != "/opt/innolab" ]; then
+                echo "Refusing to deploy outside /opt/innolab" >&2
+                exit 1
+              fi
+              git remote set-url origin "$REPOSITORY_URL"
+              git fetch --prune origin "$DEPLOY_BRANCH"
+              target_revision=$(git rev-parse "origin/$DEPLOY_BRANCH")
+              desired_state=$(printf '%s\n%s\n%s\n' \
+                "$target_revision" "$PUBLIC_URL" "$SITE_ADDRESS" | sha256sum | cut -d ' ' -f 1)
+              deployed_state=$(cat "$state_file" 2>/dev/null || true)
+
+              compose=(docker compose --env-file /etc/innolab/runtime.env -f docker-compose.yml -f /etc/innolab/docker-compose.ec2.yml)
+              portal_running=$("${!compose[@]}" ps --status running -q portal 2>/dev/null || true)
+              if [ "$desired_state" = "$deployed_state" ] && [ -n "$portal_running" ]; then
+                exit 0
+              fi
+
+              git reset --hard "$target_revision"
+              git clean -fdx
+              "${!compose[@]}" up -d --build --remove-orphans --wait --wait-timeout 300
+              printf '%s\n' "$desired_state" > "$state_file"
+              docker image prune -f
+              EOF
+              chmod 0755 /usr/local/sbin/innolab-deploy
+
+              cat > /etc/systemd/system/innolab-deploy.service <<'EOF'
+              [Unit]
+              Description=Deploy the latest Innolab revision
+              Wants=network-online.target
+              After=network-online.target docker.service
+              Requires=docker.service
+
+              [Service]
+              Type=oneshot
+              ExecStart=/usr/local/sbin/innolab-deploy
+              TimeoutStartSec=infinity
+              Nice=10
+              IOSchedulingClass=best-effort
+              IOSchedulingPriority=7
+              EOF
+
+              cat > /etc/systemd/system/innolab-deploy.timer <<'EOF'
+              [Unit]
+              Description=Check GitHub for Innolab updates every minute
+
+              [Timer]
+              OnBootSec=30s
+              OnUnitActiveSec=1min
+              RandomizedDelaySec=10s
+              Persistent=true
+
+              [Install]
+              WantedBy=timers.target
+              EOF
+
+              rm -f /var/lib/innolab/deployed-state
+              systemctl daemon-reload
+              systemctl enable --now innolab-deploy.timer
+              systemctl start innolab-deploy.service
+            - ResolvedPublicUrl: !If
+                - HasDomainName
+                - !Sub https://${DomainName}
+                - !Sub http://${ElasticIp}
+              ResolvedSiteAddress: !If
+                - HasDomainName
+                - !Ref DomainName
+                - !Sub http://${ElasticIp}
+      Tags:
+        - Key: Name
+          Value: innolab-mvp
+        - Key: Project
+          Value: innolab
+        - Key: RepositoryUrl
+          Value: !Ref RepositoryUrl
+        - Key: DeployBranch
+          Value: !Ref DeployBranch
+        - Key: PublicUrl
+          Value: !If
+            - HasDomainName
+            - !Sub https://${DomainName}
+            - !Sub http://${ElasticIp}
+        - Key: SiteAddress
+          Value: !If
+            - HasDomainName
+            - !Ref DomainName
+            - !Sub http://${ElasticIp}
+
+  ElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIp.AllocationId
+      InstanceId: !Ref InnolabInstance
+
+  BootstrapAssociation:
+    Type: AWS::SSM::Association
+    DependsOn: ElasticIpAssociation
+    Properties:
+      Name: AWS-RunShellScript
+      AssociationName: !Sub ${AWS::StackName}-innolab-bootstrap
+      Targets:
+        - Key: InstanceIds
+          Values:
+            - !Ref InnolabInstance
+      WaitForSuccessTimeoutSeconds: 1800
+      Parameters:
+        commands:
+          - !Sub |
+              set -euo pipefail
+              echo "Applying Innolab bootstrap version ${BootstrapVersion}"
+              dnf install -y curl
+              token=$(curl -fsS -X PUT \
+                -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
+                http://169.254.169.254/latest/api/token)
+              install -d -m 0700 /var/lib/innolab
+              curl -fsS \
+                -H "X-aws-ec2-metadata-token: $token" \
+                http://169.254.169.254/latest/user-data \
+                -o /var/lib/innolab/bootstrap.sh
+              chmod 0700 /var/lib/innolab/bootstrap.sh
+              /bin/bash /var/lib/innolab/bootstrap.sh
+
+Outputs:
+  InstanceId:
+    Description: EC2 instance ID to select in EC2 or Systems Manager
+    Value: !Ref InnolabInstance
+  PublicIp:
+    Description: Stable Elastic IP assigned to the instance
+    Value: !Ref ElasticIp
+  ApplicationUrl:
+    Description: Public URL for Innolab
+    Value: !If
+      - HasDomainName
+      - !Sub https://${DomainName}
+      - !Sub http://${ElasticIp}
+  AwsRegion:
+    Description: AWS region selected during stack creation
+    Value: !Ref AWS::Region
+  SessionManagerInstructions:
+    Description: How to administer the instance
+    Value: >-
+      Open EC2, select the instance, choose Connect, then Session Manager. No
+      inbound TCP/22 is configured.

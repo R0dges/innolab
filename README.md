@@ -273,6 +273,52 @@ bun run seed
 bun run dev          # http://localhost:3000
 ```
 
+## Deploy on AWS EC2
+
+The CloudFormation template at
+[`infra/innolab-ec2-cloudformation.yaml`](./infra/innolab-ec2-cloudformation.yaml)
+creates an Amazon Linux 2023 instance and deploys this public repository without
+opening SSH. It provides:
+
+- an Elastic IP and inbound HTTP/HTTPS only;
+- Docker, Docker Compose, PostgreSQL, Juryza, and a Caddy reverse proxy;
+- random database and Better Auth secrets stored only on the instance;
+- administration through AWS Systems Manager Session Manager;
+- automatic deployment of the selected GitHub branch within about one minute
+  of each push.
+
+Push this template and the accompanying Compose change to GitHub before creating
+the stack. In AWS CloudFormation, create a stack from the template and keep the
+default repository and `main` branch. Leave `DomainName` empty for HTTP access
+through the stack's `ApplicationUrl` output. For HTTPS, enter the intended domain
+when creating or updating the stack, then point its DNS `A` record to the
+`PublicIp` output. Caddy obtains and renews its certificate automatically after
+DNS propagation.
+
+If the original infrastructure-only template has already been deployed, update
+that stack with this template. Its Systems Manager association applies the new
+bootstrap to the existing instance. Increment `BootstrapVersion` whenever you
+want CloudFormation to force that bootstrap to run again.
+
+The first deployment builds the Next.js image on the instance and can take
+several minutes. CloudFormation waits up to 30 minutes for the bootstrap.
+
+To inspect a deployment, connect with Session Manager and run:
+
+```sh
+sudo systemctl status innolab-deploy.service
+sudo journalctl -u innolab-deploy.service -n 200 --no-pager
+cd /opt/innolab
+sudo docker compose --env-file /etc/innolab/runtime.env \
+  -f docker-compose.yml -f /etc/innolab/docker-compose.ec2.yml ps
+```
+
+To trigger an immediate deployment instead of waiting for the timer:
+
+```sh
+sudo systemctl start innolab-deploy.service
+```
+
 Quality gates (from the repo root):
 - `bun run typecheck` — TypeScript type checking across all workspaces.
 - `bun run lint` — Biome code style and linter checks.
