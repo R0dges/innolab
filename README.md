@@ -300,6 +300,9 @@ that stack with this template. Its Systems Manager association applies the new
 bootstrap to the existing instance. Increment `BootstrapVersion` whenever you
 want CloudFormation to force that bootstrap to run again.
 
+Amazon Linux 2023 already provides `curl-minimal`; the bootstrap intentionally
+keeps it instead of installing the conflicting full `curl` package.
+
 The first deployment builds the Next.js image on the instance and can take
 several minutes. The bootstrap runs as a systemd unit so a slow image build does
 not roll the whole CloudFormation stack back; the deployment timer retries a

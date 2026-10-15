@@ -43,7 +43,7 @@ Parameters:
     Description: Docker Compose release installed on the host
   BootstrapVersion:
     Type: String
-    Default: "2"
+    Default: "3"
     AllowedPattern: ^[0-9]+$
     Description: Increment this value to force Systems Manager to rerun bootstrap
 
@@ -193,7 +193,9 @@ Resources:
               exec 8>/run/lock/innolab-bootstrap.lock
               flock 8
 
-              dnf install -y docker git curl openssl
+              # AL2023 ships curl-minimal. Installing the full curl package
+              # conflicts with it, even though the curl command already exists.
+              dnf install -y docker git openssl
               systemctl enable --now docker
               systemctl enable --now amazon-ssm-agent || true
 
@@ -430,7 +432,7 @@ Resources:
               echo "Applying Innolab bootstrap version ${BootstrapVersion}"
               if ! command -v curl >/dev/null 2>&1; then
                 for attempt in $(seq 1 30); do
-                  dnf install -y curl && break
+                  dnf install -y curl-minimal && break
                   sleep 10
                 done
               fi
