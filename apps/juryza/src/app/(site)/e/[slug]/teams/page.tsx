@@ -78,7 +78,7 @@ export default function EventTeamsPage() {
   }, [data, lookingOnly, q, max]);
 
   const open = ev ? submissionsAreOpen(ev.event) : false;
-  const canCreate = open && ev?.viewer && !ev.viewer.team;
+  const canCreate = open && ev?.event.workflow !== "innolab" && ev?.viewer && !ev.viewer.team;
   const looking =
     data?.teams.filter((t) => t.lookingForMembers && t.members.length < data.maxTeamSize).length ??
     0;

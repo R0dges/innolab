@@ -49,6 +49,7 @@ export function EventChrome({ slug, children }: { slug: string; children: React.
   const base = `/e/${slug}`;
   const tabs = [
     { href: base, label: "Overview", exact: true },
+    ...(e?.workflow === "innolab" ? [{ href: `${base}/pitches`, label: "Ideas" }] : []),
     { href: `${base}/projects`, label: "Projects" },
     { href: `${base}/teams`, label: "Teams" },
     ...(e && hasVoting(e) ? [{ href: `${base}/vote`, label: "Vote" }] : []),

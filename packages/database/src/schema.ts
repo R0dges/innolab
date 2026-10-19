@@ -154,6 +154,13 @@ export const event = pgTable("event", {
   hue: integer("hue").default(250).notNull(),
   // draft events are visible to organizers only; published are public.
   visibility: text("visibility").default("published").notNull(), // draft | published
+  // Standard events keep Juryza's project-first flow. Innolab adds an idea
+  // preselection before teams and projects are formed.
+  workflow: text("workflow").default("standard").notNull(), // standard | innolab
+  pitchSubmissionsOpen: timestamp("pitch_submissions_open"),
+  pitchSubmissionsClose: timestamp("pitch_submissions_close"),
+  pitchVotingOpen: timestamp("pitch_voting_open"),
+  pitchVotingClose: timestamp("pitch_voting_close"),
   // Lifecycle: submissions → judging → community voting → results.
   submissionsOpen: timestamp("submissions_open"),
   submissionsClose: timestamp("submissions_close").notNull(),
@@ -254,6 +261,47 @@ export const announcement = pgTable("announcement", {
 });
 
 /* ------------------------------------------------------------------ */
+/* Innolab idea preselection                                          */
+/* ------------------------------------------------------------------ */
+
+export const pitch = pgTable(
+  "pitch",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    authorId: text("author_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    status: text("status").default("draft").notNull(), // draft | submitted | selected | rejected
+    submittedAt: timestamp("submitted_at"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => [index("pitch_event_status_idx").on(t.eventId, t.status)]
+);
+
+export const pitchVote = pgTable(
+  "pitch_vote",
+  {
+    id: text("id").primaryKey(),
+    pitchId: text("pitch_id")
+      .notNull()
+      .references(() => pitch.id, { onDelete: "cascade" }),
+    voterId: text("voter_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [unique().on(t.pitchId, t.voterId)]
+);
+
+/* ------------------------------------------------------------------ */
 /* Teams and projects                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -295,6 +343,9 @@ export const project = pgTable(
       .notNull()
       .references(() => event.id, { onDelete: "cascade" }),
     teamId: text("team_id").references(() => team.id, { onDelete: "set null" }),
+    pitchId: text("pitch_id")
+      .unique()
+      .references(() => pitch.id, { onDelete: "set null" }),
     trackId: text("track_id").references(() => track.id, { onDelete: "set null" }),
     title: text("title").notNull(),
     tagline: text("tagline"),
@@ -566,6 +617,19 @@ export const eventRelations = relations(event, ({ many }) => ({
   criteria: many(rubricCriterion),
   teams: many(team),
   projects: many(project),
+  pitches: many(pitch),
+}));
+
+export const pitchRelations = relations(pitch, ({ one, many }) => ({
+  event: one(event, { fields: [pitch.eventId], references: [event.id] }),
+  author: one(user, { fields: [pitch.authorId], references: [user.id] }),
+  votes: many(pitchVote),
+  project: one(project),
+}));
+
+export const pitchVoteRelations = relations(pitchVote, ({ one }) => ({
+  pitch: one(pitch, { fields: [pitchVote.pitchId], references: [pitch.id] }),
+  voter: one(user, { fields: [pitchVote.voterId], references: [user.id] }),
 }));
 
 export const trackRelations = relations(track, ({ one, many }) => ({
@@ -596,6 +660,7 @@ export const projectRelations = relations(project, ({ one, many }) => ({
   event: one(event, { fields: [project.eventId], references: [event.id] }),
   team: one(team, { fields: [project.teamId], references: [team.id] }),
   track: one(track, { fields: [project.trackId], references: [track.id] }),
+  pitch: one(pitch, { fields: [project.pitchId], references: [pitch.id] }),
   assignments: many(assignment),
   scores: many(score),
   votes: many(vote),
@@ -627,6 +692,8 @@ export type RubricCriterion = typeof rubricCriterion.$inferSelect;
 export type Team = typeof team.$inferSelect;
 export type TeamMember = typeof teamMember.$inferSelect;
 export type Project = typeof project.$inferSelect;
+export type Pitch = typeof pitch.$inferSelect;
+export type PitchVote = typeof pitchVote.$inferSelect;
 export type Assignment = typeof assignment.$inferSelect;
 export type Score = typeof score.$inferSelect;
 export type Vote = typeof vote.$inferSelect;

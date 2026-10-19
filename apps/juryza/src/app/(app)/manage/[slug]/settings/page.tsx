@@ -52,6 +52,7 @@ import { RadioGroup, RadioGroupItem } from "@juryza/ui/components/ui/radio-group
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -71,6 +72,7 @@ import type { Event, Json, RichDoc } from "@/lib/types";
 type Mode = "online" | "in-person" | "hybrid";
 type Access = "authenticated" | "email" | "open";
 type VotingMode = "quadratic" | "writeup";
+type Workflow = "standard" | "innolab";
 
 interface Form {
   name: string;
@@ -81,6 +83,11 @@ interface Form {
   hue: number;
   content: RichDoc | null;
   rules: RichDoc | null;
+  workflow: Workflow;
+  pitchSubmissionsOpen: string;
+  pitchSubmissionsClose: string;
+  pitchVotingOpen: string;
+  pitchVotingClose: string;
   submissionsOpen: string;
   submissionsClose: string;
   judgingClose: string;
@@ -99,12 +106,33 @@ interface Form {
 type Key = keyof Form;
 
 const DATE_KEYS = [
+  "pitchSubmissionsOpen",
+  "pitchSubmissionsClose",
+  "pitchVotingOpen",
+  "pitchVotingClose",
   "submissionsOpen",
   "submissionsClose",
   "judgingClose",
   "votingOpen",
   "votingClose",
   "votingElectorateLockAt",
+] as const;
+
+const PROJECT_DATE_KEYS = [
+  "submissionsOpen",
+  "submissionsClose",
+  "judgingClose",
+  "votingOpen",
+  "votingClose",
+  "votingElectorateLockAt",
+] as const;
+
+const PITCH_KEYS = [
+  "workflow",
+  "pitchSubmissionsOpen",
+  "pitchSubmissionsClose",
+  "pitchVotingOpen",
+  "pitchVotingClose",
 ] as const;
 
 const toLocalInput = (v: string | null) => {
@@ -124,6 +152,11 @@ function toForm(e: Json<Event>): Form {
     hue: e.hue,
     content: (e.content as RichDoc | null) ?? null,
     rules: (e.rules as RichDoc | null) ?? null,
+    workflow: (e.workflow as Workflow) ?? "standard",
+    pitchSubmissionsOpen: toLocalInput(e.pitchSubmissionsOpen),
+    pitchSubmissionsClose: toLocalInput(e.pitchSubmissionsClose),
+    pitchVotingOpen: toLocalInput(e.pitchVotingOpen),
+    pitchVotingClose: toLocalInput(e.pitchVotingClose),
     submissionsOpen: toLocalInput(e.submissionsOpen),
     submissionsClose: toLocalInput(e.submissionsClose),
     judgingClose: toLocalInput(e.judgingClose),
@@ -359,7 +392,7 @@ function SettingsForm({ event }: { event: Json<Event> }) {
       </SectionCard>
 
       <SectionCard
-        {...section("Schedule", DATE_KEYS)}
+        {...section("Schedule", PROJECT_DATE_KEYS)}
         description={`Times are in your timezone (${Intl.DateTimeFormat().resolvedOptions().timeZone}).`}
         error={scheduleError}
       >
@@ -398,6 +431,68 @@ function SettingsForm({ event }: { event: Json<Event> }) {
               onChange={(v) => set("votingClose", v)}
             />
           </div>
+        </FieldGroup>
+      </SectionCard>
+
+      <SectionCard
+        {...section("Innolab journey", PITCH_KEYS)}
+        description="Add an idea submission and preselection phase before teams create their projects."
+        error={innolabScheduleProblem(form)}
+      >
+        <FieldGroup>
+          <Field>
+            <FieldLabel>Event journey</FieldLabel>
+            <Select
+              value={form.workflow}
+              onValueChange={(value) => value && set("workflow", value as Workflow)}
+              items={{ standard: "Standard Juryza", innolab: "Innolab" }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="standard">Standard Juryza</SelectItem>
+                  <SelectItem value="innolab">Innolab</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <FieldDescription>
+              Innolab collects and selects ideas before team formation. Existing project voting
+              remains separate.
+            </FieldDescription>
+          </Field>
+          {form.workflow === "innolab" && (
+            <div className="grid gap-5 sm:grid-cols-2">
+              <DateInput
+                id="pitchSubmissionsOpen"
+                label="Idea submissions open"
+                value={form.pitchSubmissionsOpen}
+                onChange={(value) => set("pitchSubmissionsOpen", value)}
+              />
+              <DateInput
+                id="pitchSubmissionsClose"
+                label="Idea submissions close"
+                value={form.pitchSubmissionsClose}
+                onChange={(value) => set("pitchSubmissionsClose", value)}
+                required
+              />
+              <DateInput
+                id="pitchVotingOpen"
+                label="Idea voting opens"
+                value={form.pitchVotingOpen}
+                onChange={(value) => set("pitchVotingOpen", value)}
+                required
+              />
+              <DateInput
+                id="pitchVotingClose"
+                label="Idea voting closes"
+                value={form.pitchVotingClose}
+                onChange={(value) => set("pitchVotingClose", value)}
+                required
+              />
+            </div>
+          )}
         </FieldGroup>
       </SectionCard>
 
@@ -613,6 +708,28 @@ function scheduleProblem(f: Form): string | null {
     return "Judging must close after the submission deadline.";
   if (vOpen !== null && vClose !== null && vOpen >= vClose)
     return "Voting must open before it closes.";
+  return null;
+}
+
+function innolabScheduleProblem(f: Form): string | null {
+  if (f.workflow !== "innolab") return null;
+  const t = (value: string) => (value ? new Date(value).getTime() : null);
+  const submissionsOpen = t(f.pitchSubmissionsOpen);
+  const submissionsClose = t(f.pitchSubmissionsClose);
+  const votingOpen = t(f.pitchVotingOpen);
+  const votingClose = t(f.pitchVotingClose);
+  const projectsOpen = t(f.submissionsOpen);
+  if (submissionsClose === null || votingOpen === null || votingClose === null) {
+    return "Set the idea submission deadline and the complete voting window.";
+  }
+  if (submissionsOpen !== null && submissionsOpen >= submissionsClose) {
+    return "Idea submissions must open before they close.";
+  }
+  if (votingOpen < submissionsClose) return "Idea voting must start after submissions close.";
+  if (votingClose <= votingOpen) return "Idea voting must close after it opens.";
+  if (projectsOpen !== null && projectsOpen < votingClose) {
+    return "Project submissions must open after idea voting closes.";
+  }
   return null;
 }
 

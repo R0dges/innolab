@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react";
 
-import { CalendarClock, CheckCircle2, Gavel, Rocket, Vote } from "lucide-react";
+import {
+  CalendarClock,
+  CheckCircle2,
+  Gavel,
+  Lightbulb,
+  Rocket,
+  UsersRound,
+  Vote,
+} from "lucide-react";
 
 import { Badge } from "@juryza/ui/components/ui/badge";
 import { cn } from "@juryza/ui/lib/utils";
@@ -48,6 +56,9 @@ export function EventCover({
 
 const PHASE_ICON: Record<Phase, React.ComponentType<{ className?: string }>> = {
   upcoming: CalendarClock,
+  pitching: Lightbulb,
+  "pitch-voting": Vote,
+  "team-formation": UsersRound,
   submissions: Rocket,
   judging: Gavel,
   voting: Vote,
@@ -59,7 +70,14 @@ export function PhaseBadge({ event, className }: { event: EventDates; className?
   const Icon = PHASE_ICON[phase];
   return (
     <Badge
-      variant={phase === "submissions" || phase === "voting" ? "default" : "secondary"}
+      variant={
+        phase === "pitching" ||
+        phase === "pitch-voting" ||
+        phase === "submissions" ||
+        phase === "voting"
+          ? "default"
+          : "secondary"
+      }
       className={cn("gap-1", className)}
     >
       <Icon className="size-3" />

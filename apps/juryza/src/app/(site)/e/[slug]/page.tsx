@@ -12,6 +12,7 @@ import {
   Check,
   Gavel,
   Layers,
+  Lightbulb,
   Link2,
   LogIn,
   Megaphone,
@@ -49,6 +50,7 @@ import { Timeline } from "@/components/event-bits";
 import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/lib/api";
 import { formatDate, pluralize, relativeTime } from "@/lib/format";
+import { eventRegistrationIsOpen } from "@/lib/innolab";
 import { hasVoting, phaseOf, submissionsAreOpen } from "@/lib/phase";
 import { type EventDetail, eventKey, useEvent } from "@/lib/queries";
 import { isEmptyDoc, parseRichDoc } from "@/lib/rich-text";
@@ -393,7 +395,74 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
   });
 
   let body: React.ReactNode;
-  if (!v) {
+  if (e.workflow === "innolab") {
+    if (!v) {
+      body = (
+        <>
+          <p className="text-muted-foreground text-sm">
+            Create an account to register, propose an idea and take part in the preselection.
+          </p>
+          <Button nativeButton={false} render={<Link href={`/signup?next=${next}`} />}>
+            <UserPlus /> Sign up to participate
+          </Button>
+        </>
+      );
+    } else if (v.team) {
+      const t = teamQuery.data;
+      body = (
+        <>
+          <Link
+            href={`/teams/${v.team.id}`}
+            className="hover:bg-muted/50 flex items-center gap-3 rounded-lg border p-3 transition-colors"
+          >
+            <UsersRound className="text-primary size-5" />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{v.team.name}</span>
+            <ArrowRight className="text-muted-foreground size-4" />
+          </Link>
+          {t?.project && (
+            <Button nativeButton={false} render={<Link href={`/projects/${t.project.id}`} />}>
+              <Rocket /> Open project
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            nativeButton={false}
+            render={<Link href={`/e/${slug}/pitches`} />}
+          >
+            <Lightbulb /> View original ideas
+          </Button>
+        </>
+      );
+    } else if (!v.registered && eventRegistrationIsOpen(e)) {
+      body = (
+        <>
+          <p className="text-muted-foreground text-sm">
+            Register without a team. You can propose an idea first and form a team only if it is
+            selected.
+          </p>
+          <Button onClick={() => register.mutate()} disabled={register.isPending}>
+            {register.isPending ? <Spinner /> : <Check />} Register for {e.name}
+          </Button>
+        </>
+      );
+    } else {
+      body = (
+        <>
+          {v.registered && (
+            <div className="bg-success/10 text-success flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium">
+              <Check className="size-4" /> You're registered
+            </div>
+          )}
+          <p className="text-muted-foreground text-sm">
+            Ideas, voting, selection and project creation all continue from the Innolab board.
+          </p>
+          <Button nativeButton={false} render={<Link href={`/e/${slug}/pitches`} />}>
+            <Lightbulb /> Open ideas
+          </Button>
+        </>
+      );
+    }
+  } else if (!v) {
     body = (
       <>
         <p className="text-muted-foreground text-sm">

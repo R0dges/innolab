@@ -6,10 +6,10 @@ import { db, event, project, registration, rubricCriterion, track } from "@/lib/
 import { id } from "@/lib/ids";
 import { docToText } from "@/lib/rich-text";
 import { audit } from "@/lib/server/audit";
-import { conflict, created, handle, readBody } from "@/lib/server/http";
+import { badRequest, conflict, created, handle, readBody } from "@/lib/server/http";
 import { requireRole, resolveIdentity } from "@/lib/server/identity";
 import { eventInput } from "@/lib/server/schemas";
-import { toDate } from "@/lib/server/validation";
+import { innolabScheduleIssue, toDate } from "@/lib/server/validation";
 import { dispatch } from "@/lib/server/webhooks";
 
 /**
@@ -62,6 +62,8 @@ export const GET = handle(async (req: NextRequest) => {
 export const POST = handle(async (req: NextRequest) => {
   const me = await requireRole(req, "organizer");
   const b = await readBody(req, eventInput);
+  const scheduleIssue = innolabScheduleIssue(b);
+  if (scheduleIssue) throw badRequest(scheduleIssue);
 
   const [taken] = await db
     .select({ id: event.id })
@@ -84,6 +86,11 @@ export const POST = handle(async (req: NextRequest) => {
       location: b.location ?? null,
       hue: b.hue,
       visibility: b.visibility,
+      workflow: b.workflow,
+      pitchSubmissionsOpen: toDate(b.pitchSubmissionsOpen),
+      pitchSubmissionsClose: toDate(b.pitchSubmissionsClose),
+      pitchVotingOpen: toDate(b.pitchVotingOpen),
+      pitchVotingClose: toDate(b.pitchVotingClose),
       submissionsOpen: toDate(b.submissionsOpen),
       submissionsClose: new Date(b.submissionsClose),
       judgingClose: toDate(b.judgingClose),

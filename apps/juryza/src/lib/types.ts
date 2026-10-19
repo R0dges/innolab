@@ -16,6 +16,8 @@ export type {
   AuditLog,
   Certificate,
   Event,
+  Pitch,
+  PitchVote,
   Prize,
   Project,
   RichDoc,

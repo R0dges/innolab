@@ -16,10 +16,10 @@ import {
 import { docToText } from "@/lib/rich-text";
 import { audit } from "@/lib/server/audit";
 import { canManage, isPanelJudge, loadEvent, loadManagedEvent, teamOf } from "@/lib/server/events";
-import { conflict, handle, readBody } from "@/lib/server/http";
+import { badRequest, conflict, handle, readBody } from "@/lib/server/http";
 import { requireUser, resolveIdentity } from "@/lib/server/identity";
 import { eventPatch } from "@/lib/server/schemas";
-import { toDate } from "@/lib/server/validation";
+import { innolabScheduleIssue, toDate } from "@/lib/server/validation";
 import { dispatch } from "@/lib/server/webhooks";
 
 type P = { event: string };
@@ -98,6 +98,8 @@ export const PATCH = handle<P>(async (req, { event: ref }) => {
   const me = await requireUser(req);
   const e = await loadManagedEvent(ref, me);
   const b = await readBody(req, eventPatch);
+  const scheduleIssue = innolabScheduleIssue({ ...e, ...b });
+  if (scheduleIssue) throw badRequest(scheduleIssue);
 
   if (b.slug && b.slug !== e.slug) {
     const [taken] = await db
@@ -115,6 +117,10 @@ export const PATCH = handle<P>(async (req, { event: ref }) => {
     votingOpen,
     votingClose,
     votingElectorateLockAt,
+    pitchSubmissionsOpen,
+    pitchSubmissionsClose,
+    pitchVotingOpen,
+    pitchVotingClose,
     ...rest
   } = b;
   await db
@@ -130,6 +136,14 @@ export const PATCH = handle<P>(async (req, { event: ref }) => {
       ...(votingElectorateLockAt !== undefined && {
         votingElectorateLockAt: toDate(votingElectorateLockAt),
       }),
+      ...(pitchSubmissionsOpen !== undefined && {
+        pitchSubmissionsOpen: toDate(pitchSubmissionsOpen),
+      }),
+      ...(pitchSubmissionsClose !== undefined && {
+        pitchSubmissionsClose: toDate(pitchSubmissionsClose),
+      }),
+      ...(pitchVotingOpen !== undefined && { pitchVotingOpen: toDate(pitchVotingOpen) }),
+      ...(pitchVotingClose !== undefined && { pitchVotingClose: toDate(pitchVotingClose) }),
       updatedAt: new Date(),
     })
     .where(eq(event.id, e.id));

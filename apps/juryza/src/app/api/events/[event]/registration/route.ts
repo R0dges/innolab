@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 
 import { db, registration } from "@/lib/db";
-import { submissionsAreOpen } from "@/lib/phase";
+import { eventRegistrationIsOpen } from "@/lib/innolab";
 import { audit } from "@/lib/server/audit";
 import { loadEvent, register, teamOf } from "@/lib/server/events";
 import { badRequest, forbidden, handle } from "@/lib/server/http";
@@ -17,7 +17,7 @@ type P = { event: string };
 export const POST = handle<P>(async (req, { event: ref }) => {
   const me = await requireUser(req);
   const e = await loadEvent(ref, me);
-  if (!submissionsAreOpen(e)) throw forbidden("Registration is closed for this event");
+  if (!eventRegistrationIsOpen(e)) throw forbidden("Registration is closed for this event");
   await register(e.id, me.userId);
   await audit({ eventId: e.id, actor: me, action: "registration.created", req });
   return { registered: true };

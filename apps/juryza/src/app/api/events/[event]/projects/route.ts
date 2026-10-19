@@ -2,6 +2,7 @@ import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 
 import { comment, db, project, team, track } from "@/lib/db";
 import { id } from "@/lib/ids";
+import { isInnolab } from "@/lib/innolab";
 import { submissionsAreOpen } from "@/lib/phase";
 import { docToText } from "@/lib/rich-text";
 import { audit } from "@/lib/server/audit";
@@ -73,6 +74,9 @@ export const GET = handle<P>(async (req, { event: ref }) => {
 export const POST = handle<P>(async (req, { event: ref }) => {
   const me = await requireUser(req);
   const e = await loadEvent(ref, me);
+  if (isInnolab(e)) {
+    throw forbidden("Innolab projects must be created from a selected pitch");
+  }
 
   // The deadline holds in the backend: no new projects once submissions close.
   if (!submissionsAreOpen(e)) {

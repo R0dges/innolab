@@ -7,9 +7,22 @@
  * Voting can overlap judging; the phase reports the most public-facing one.
  */
 
-export type Phase = "upcoming" | "submissions" | "judging" | "voting" | "results";
+export type Phase =
+  | "upcoming"
+  | "pitching"
+  | "pitch-voting"
+  | "team-formation"
+  | "submissions"
+  | "judging"
+  | "voting"
+  | "results";
 
 export interface EventDates {
+  workflow?: string;
+  pitchSubmissionsOpen?: Date | string | null;
+  pitchSubmissionsClose?: Date | string | null;
+  pitchVotingOpen?: Date | string | null;
+  pitchVotingClose?: Date | string | null;
   submissionsOpen: Date | string | null;
   submissionsClose: Date | string;
   judgingClose?: Date | string | null;
@@ -40,6 +53,16 @@ export function hasVoting(e: EventDates): boolean {
 
 export function phaseOf(e: EventDates, now = Date.now()): Phase {
   if (e.resultsPublished) return "results";
+  if (e.workflow === "innolab") {
+    const pitchOpen = t(e.pitchSubmissionsOpen);
+    const pitchClose = t(e.pitchSubmissionsClose);
+    const pitchVoteClose = t(e.pitchVotingClose);
+    const projectOpen = t(e.submissionsOpen);
+    if (pitchOpen !== null && now < pitchOpen) return "upcoming";
+    if (pitchClose !== null && now < pitchClose) return "pitching";
+    if (pitchVoteClose !== null && now < pitchVoteClose) return "pitch-voting";
+    if (projectOpen !== null && now < projectOpen) return "team-formation";
+  }
   const open = t(e.submissionsOpen);
   if (open !== null && now < open) return "upcoming";
   if (submissionsAreOpen(e, now)) return "submissions";
@@ -49,6 +72,9 @@ export function phaseOf(e: EventDates, now = Date.now()): Phase {
 
 export const PHASE_LABEL: Record<Phase, string> = {
   upcoming: "Upcoming",
+  pitching: "Ideas open",
+  "pitch-voting": "Idea voting",
+  "team-formation": "Team formation",
   submissions: "Submissions open",
   judging: "Judging",
   voting: "Community voting",
@@ -58,6 +84,30 @@ export const PHASE_LABEL: Record<Phase, string> = {
 /** Ordered milestones for a timeline view. */
 export function milestones(e: EventDates) {
   const list: { key: string; label: string; at: Date | null }[] = [
+    ...(e.workflow === "innolab"
+      ? [
+          {
+            key: "pitchOpen",
+            label: "Ideas open",
+            at: e.pitchSubmissionsOpen ? new Date(e.pitchSubmissionsOpen) : null,
+          },
+          {
+            key: "pitchClose",
+            label: "Ideas close",
+            at: e.pitchSubmissionsClose ? new Date(e.pitchSubmissionsClose) : null,
+          },
+          {
+            key: "pitchVoteOpen",
+            label: "Idea voting opens",
+            at: e.pitchVotingOpen ? new Date(e.pitchVotingOpen) : null,
+          },
+          {
+            key: "pitchVoteClose",
+            label: "Idea voting closes",
+            at: e.pitchVotingClose ? new Date(e.pitchVotingClose) : null,
+          },
+        ]
+      : []),
     {
       key: "open",
       label: "Submissions open",

@@ -1,8 +1,10 @@
 /**
  * Seed the portal. Runs at container boot after the schema is pushed.
  *
- * Idempotent: if any user exists the seed does nothing (so restarting never
- * wipes real data); `SEED_RESET=1` truncates everything first.
+ * Idempotent: if the well-known simulation accounts already exist the seed
+ * does nothing (so restarting never duplicates fixtures). Unrelated users do
+ * not prevent the demo data from being added; `SEED_RESET=1` truncates
+ * everything first.
  *
  *  1. Well-known accounts: admin, organizer, judge_a, judge_b, participant.
  *  2. The DOGFOOD fixture event, imported through the same importer the
@@ -136,7 +138,11 @@ async function main() {
     console.info("[seed] SEED_RESET=1 — truncating all tables");
     await truncateAll();
   } else {
-    const [existing] = await db.select({ id: userTable.id }).from(userTable).limit(1);
+    const [existing] = await db
+      .select({ id: userTable.id })
+      .from(userTable)
+      .where(eq(userTable.email, "organizer@juryza.test"))
+      .limit(1);
     if (existing) {
       console.info("[seed] data already present; keeping it (set SEED_RESET=1 to reseed)");
       await writeCheckerConfig();

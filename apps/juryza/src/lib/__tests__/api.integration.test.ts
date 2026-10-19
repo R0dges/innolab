@@ -227,4 +227,140 @@ describe.skipIf(!BASE)("API integrity rules", () => {
     });
     expect(res.status).toBe(401);
   });
+
+  test("the Innolab journey keeps the original pitch linked to the selected project", async () => {
+    const stamp = Date.now();
+    const slug = `innolab-test-${stamp}`;
+    const hour = 3_600_000;
+    const iso = (offset: number) => new Date(stamp + offset * hour).toISOString();
+    let createdEvent = false;
+
+    try {
+      const created = await call("/api/events", {
+        as: as.organizer,
+        method: "POST",
+        body: {
+          name: `Innolab integration ${stamp}`,
+          slug,
+          workflow: "innolab",
+          visibility: "published",
+          pitchSubmissionsOpen: iso(-2),
+          pitchSubmissionsClose: iso(1),
+          pitchVotingOpen: iso(2),
+          pitchVotingClose: iso(3),
+          submissionsOpen: iso(4),
+          submissionsClose: iso(24),
+        },
+      });
+      expect(created.status).toBe(201);
+      createdEvent = true;
+
+      expect(
+        (await call(`/api/events/${slug}/registration`, { as: as.participant, method: "POST" }))
+          .status
+      ).toBe(200);
+      expect(
+        (await call(`/api/events/${slug}/registration`, { as: as.judgeA, method: "POST" })).status
+      ).toBe(200);
+
+      const pitchIds: string[] = [];
+      for (let index = 1; index <= 6; index++) {
+        const response = await call(`/api/events/${slug}/pitches`, {
+          as: as.participant,
+          method: "POST",
+          body: {
+            title: `Idea ${index}`,
+            description: `Original immutable description for idea ${index}.`,
+            submit: true,
+          },
+        });
+        expect(response.status).toBe(201);
+        pitchIds.push(String(obj(response.data).id));
+      }
+
+      const openVoting = await call(`/api/events/${slug}`, {
+        as: as.organizer,
+        method: "PATCH",
+        body: {
+          pitchSubmissionsClose: iso(-0.5),
+          pitchVotingOpen: iso(-0.25),
+          pitchVotingClose: iso(1),
+          submissionsOpen: iso(2),
+        },
+      });
+      expect(openVoting.status).toBe(200);
+
+      const votedPitch = pitchIds[0] as string;
+      expect(
+        (await call(`/api/pitches/${votedPitch}/vote`, { as: as.judgeA, method: "POST" })).status
+      ).toBe(200);
+      expect(
+        (await call(`/api/pitches/${votedPitch}/vote`, { as: as.judgeA, method: "POST" })).status
+      ).toBe(200);
+
+      const close = await call(`/api/events/${slug}`, {
+        as: as.organizer,
+        method: "PATCH",
+        body: { pitchVotingClose: iso(-0.1), submissionsOpen: iso(-0.05) },
+      });
+      expect(close.status).toBe(200);
+
+      const afterVote = obj(
+        (await call(`/api/events/${slug}/pitches`, { as: as.participant })).data
+      );
+      const rows = afterVote.pitches as { id: string; votes: number; description: string }[];
+      expect(rows.find((pitch) => pitch.id === votedPitch)?.votes).toBe(1);
+
+      const selectedIds = pitchIds.slice(0, 5);
+      const selection = await call(`/api/events/${slug}/pitch-selection`, {
+        as: as.organizer,
+        method: "POST",
+        body: { pitchIds: selectedIds },
+      });
+      expect(selection.status).toBe(200);
+
+      const project = await call(`/api/pitches/${votedPitch}/project`, {
+        as: as.participant,
+        method: "POST",
+        body: { teamName: "Selected builders", projectTitle: "Developed idea" },
+      });
+      expect(project.status).toBe(201);
+      const projectId = String(obj(project.data).id);
+      const projectDetail = obj(
+        (await call(`/api/projects/${projectId}`, { as: as.participant })).data
+      );
+      expect(obj(projectDetail.project).pitchId).toBe(votedPitch);
+      expect(obj(projectDetail.project).title).toBe("Developed idea");
+
+      const finalList = obj(
+        (await call(`/api/events/${slug}/pitches`, { as: as.participant })).data
+      );
+      const finalRows = finalList.pitches as {
+        id: string;
+        status: string;
+        description: string;
+        projectId: string | null;
+      }[];
+      expect(finalRows.find((pitch) => pitch.id === votedPitch)).toMatchObject({
+        status: "selected",
+        description: "Original immutable description for idea 1.",
+        projectId,
+      });
+      const rejected = finalRows.find((pitch) => pitch.id === pitchIds[5]);
+      expect(rejected).toMatchObject({ status: "rejected", projectId: null });
+      expect(
+        (
+          await call(`/api/pitches/${pitchIds[5]}/project`, {
+            as: as.participant,
+            method: "POST",
+            body: { teamName: "Rejected team" },
+          })
+        ).status
+      ).toBe(403);
+    } finally {
+      if (createdEvent) {
+        await call(`/api/events/${slug}`, { as: as.organizer, method: "DELETE" });
+      }
+    }
+  });
 });

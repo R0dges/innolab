@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { db, project, team, teamMember, user as userTable } from "@/lib/db";
 import { id, secretToken } from "@/lib/ids";
+import { isInnolab } from "@/lib/innolab";
 import { submissionsAreOpen } from "@/lib/phase";
 import { audit } from "@/lib/server/audit";
 import { loadEvent, register, teamOf } from "@/lib/server/events";
@@ -69,6 +70,9 @@ const body = z.object({
 export const POST = handle<P>(async (req, { event: ref }) => {
   const me = await requireUser(req);
   const e = await loadEvent(ref, me);
+  if (isInnolab(e)) {
+    throw forbidden("Innolab teams are created from a selected pitch");
+  }
   if (!submissionsAreOpen(e)) throw forbidden("Team formation is closed for this event");
   if (await teamOf(e.id, me.userId)) throw conflict("You are already on a team for this event");
   const b = await readBody(req, body);
