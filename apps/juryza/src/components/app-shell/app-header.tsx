@@ -16,50 +16,56 @@ import { Separator } from "@juryza/ui/components/ui/separator";
 import { SidebarTrigger } from "@juryza/ui/components/ui/sidebar";
 import { ThemeToggle } from "@juryza/ui/theme/theme-toggle";
 
+import { LanguageToggle } from "@/components/language-toggle";
+import { useI18n } from "@/components/locale-provider";
 import { NotificationPanel } from "@/components/notifications/notification-panel";
 import type { Viewer } from "@/components/viewer";
+import type { TranslationKey } from "@/lib/i18n";
 
 import { CommandMenu } from "./command-menu";
 
-const LABELS: Record<string, string> = {
-  dashboard: "Dashboard",
-  projects: "Projects",
-  teams: "Teams",
-  judging: "Judging",
-  pairwise: "Pairwise",
-  manage: "Organize",
-  new: "New event",
-  settings: "Settings",
-  profile: "Profile",
-  account: "Account",
-  tokens: "API tokens",
-  admin: "Admin",
-  users: "Users",
-  tracks: "Tracks & prizes",
-  rubric: "Rubric",
-  judges: "Judges",
-  assignments: "Assignments",
-  submissions: "Projects",
-  participants: "Participants",
-  results: "Results",
-  voting: "Voting",
-  announcements: "Announcements",
-  certificates: "Certificates",
-  integrations: "Integrations",
-  data: "Import & export",
-  audit: "Audit log",
+const LABELS: Record<string, TranslationKey> = {
+  dashboard: "nav.dashboard",
+  projects: "nav.projects",
+  judging: "nav.evaluations",
+  manage: "nav.organize",
+  new: "nav.newEvent",
+  settings: "nav.settings",
+  profile: "nav.profile",
+  account: "nav.account",
+  admin: "nav.admin",
+  users: "nav.users",
+  tracks: "nav.tracksPrizes",
+  rubric: "nav.criteria",
+  judges: "nav.coaches",
+  assignments: "nav.assignments",
+  submissions: "nav.projects",
+  participants: "event.participants",
+  results: "nav.results",
+  announcements: "nav.announcements",
+  workspace: "nav.auditResources",
+  schedule: "nav.calendar",
+  certificates: "nav.certificates",
+  data: "nav.importExport",
+  audit: "nav.auditLog",
 };
 
 // Record ids (prj_…, tm_…) are meaningless in a breadcrumb; name the page instead.
-const ID_LABEL: Record<string, string> = { projects: "Editor", teams: "Team" };
-const label = (seg: string, parent?: string) =>
-  LABELS[seg] ??
-  (/^[a-z]{2,5}_[a-z0-9]{6,}$/.test(seg)
-    ? (ID_LABEL[parent ?? ""] ?? "Details")
-    : decodeURIComponent(seg).replace(/-/g, " "));
+const ID_LABEL: Record<string, TranslationKey> = { projects: "nav.projects" };
+
+const label = (seg: string, t: (key: TranslationKey) => string, parent?: string) => {
+  const direct = LABELS[seg];
+  if (direct) return t(direct);
+  if (/^[a-z]{2,5}_[a-z0-9]{6,}$/.test(seg)) {
+    const idLabel = ID_LABEL[parent ?? ""];
+    return idLabel ? t(idLabel) : t("nav.overview");
+  }
+  return decodeURIComponent(seg).replace(/-/g, " ");
+};
 
 export function AppHeader({ viewer }: { viewer: Viewer }) {
   const pathname = usePathname();
+  const { t } = useI18n();
   const segments = pathname.split("/").filter(Boolean);
   return (
     <header className="bg-background/80 sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b px-4 backdrop-blur md:rounded-t-xl">
@@ -76,11 +82,11 @@ export function AppHeader({ viewer }: { viewer: Viewer }) {
                 <BreadcrumbItem className={last ? "min-w-0" : "hidden sm:inline-flex"}>
                   {last ? (
                     <BreadcrumbPage className="truncate capitalize">
-                      {label(seg, segments[i - 1])}
+                      {label(seg, t, segments[i - 1])}
                     </BreadcrumbPage>
                   ) : (
                     <BreadcrumbLink className="capitalize" render={<Link href={href} />}>
-                      {label(seg, segments[i - 1])}
+                      {label(seg, t, segments[i - 1])}
                     </BreadcrumbLink>
                   )}
                 </BreadcrumbItem>
@@ -90,6 +96,7 @@ export function AppHeader({ viewer }: { viewer: Viewer }) {
         </BreadcrumbList>
       </Breadcrumb>
       <div className="flex items-center gap-2">
+        <LanguageToggle compact />
         <NotificationPanel viewer={viewer} />
         <CommandMenu viewer={viewer} />
         <ThemeToggle />

@@ -46,6 +46,18 @@ export const POST = handle<P>(async (req, { token }) => {
       `This invitation is for ${invite.email}. Sign in with that address to accept it.`
     );
   }
+  if (e.workflow === "innolab") {
+    const [inviter] = invite.invitedBy
+      ? await db
+          .select({ role: userTable.role })
+          .from(userTable)
+          .where(eq(userTable.id, invite.invitedBy))
+          .limit(1)
+      : [];
+    if (inviter?.role !== "admin") {
+      throw forbidden("Innolab judges must be appointed by a platform admin");
+    }
+  }
 
   await db.transaction(async (tx) => {
     await tx

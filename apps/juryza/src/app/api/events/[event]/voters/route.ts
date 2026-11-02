@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { db, voter } from "@/lib/db";
 import { id, secretToken } from "@/lib/ids";
+import { isInnolab } from "@/lib/innolab";
 import { audit } from "@/lib/server/audit";
 import { loadEvent } from "@/lib/server/events";
 import { badRequest, clientIp, forbidden, handle, readBody } from "@/lib/server/http";
@@ -42,6 +43,9 @@ function deliverCode(email: string, code: string, eventName: string) {
 
 export const POST = handle<P>(async (req, { event: ref }) => {
   const e = await loadEvent(ref, await resolveIdentity(req));
+  if (isInnolab(e)) {
+    throw forbidden("Innolab projects are evaluated only by appointed judges");
+  }
   if (e.votingAccess !== "email") throw badRequest("This event does not use email-verified voting");
   const { email, code } = await readBody(req, body);
   if (!emailAllowed(e, email)) {

@@ -17,7 +17,7 @@
  * content never reaches the page as raw HTML.
  */
 
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -29,6 +29,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 /** A ProseMirror/Tiptap document. Opaque to the database. */
@@ -148,19 +149,26 @@ export const event = pgTable("event", {
   description: text("description"),
   content: jsonb("content").$type<RichDoc>(),
   rules: jsonb("rules").$type<RichDoc>(),
-  mode: text("mode").default("online").notNull(), // online | in-person | hybrid
-  location: text("location"),
+  mode: text("mode").default("in-person").notNull(), // online | in-person | hybrid
+  location: text("location").default("Genève"),
   // Accent hue (0–360) for the event's cover gradient.
   hue: integer("hue").default(250).notNull(),
   // draft events are visible to organizers only; published are public.
   visibility: text("visibility").default("published").notNull(), // draft | published
   // Standard events keep Juryza's project-first flow. Innolab adds an idea
   // preselection before teams and projects are formed.
-  workflow: text("workflow").default("standard").notNull(), // standard | innolab
+  workflow: text("workflow").default("innolab").notNull(), // standard | innolab
   pitchSubmissionsOpen: timestamp("pitch_submissions_open"),
   pitchSubmissionsClose: timestamp("pitch_submissions_close"),
   pitchVotingOpen: timestamp("pitch_voting_open"),
   pitchVotingClose: timestamp("pitch_voting_close"),
+  // A coach reveals every submitted pitch at the start of the presentation session.
+  pitchPresentationOpenedAt: timestamp("pitch_presentation_opened_at"),
+  // Pitch selection is finalized once: the quota and deterministic tie-break seed
+  // make the resulting projects reproducible and auditable.
+  pitchSelectionCount: integer("pitch_selection_count"),
+  pitchSelectionSeed: text("pitch_selection_seed"),
+  pitchSelectionFinalizedAt: timestamp("pitch_selection_finalized_at"),
   // Lifecycle: submissions → judging → community voting → results.
   submissionsOpen: timestamp("submissions_open"),
   submissionsClose: timestamp("submissions_close").notNull(),
@@ -170,7 +178,7 @@ export const event = pgTable("event", {
   resultsPublished: boolean("results_published").default(false).notNull(),
   isFixture: boolean("is_fixture").default(false).notNull(),
   // Team + judging configuration.
-  maxTeamSize: integer("max_team_size").default(4).notNull(),
+  maxTeamSize: integer("max_team_size").default(6).notNull(),
   reviewsPerProject: integer("reviews_per_project").default(3).notNull(),
   // Community voting configuration (T3).
   votingAccess: text("voting_access").default("authenticated").notNull(), // open | email | authenticated
@@ -218,7 +226,7 @@ export const prize = pgTable("prize", {
 });
 
 /**
- * Organizer-configurable, weighted scoring criteria (T2). Weights are relative;
+ * Admin-configurable, weighted scoring criteria (T2). Weights are relative;
  * they are normalized to sum to 1 at compute time (see lib/scoring.ts).
  */
 export const rubricCriterion = pgTable("rubric_criterion", {
@@ -255,10 +263,114 @@ export const announcement = pgTable("announcement", {
     .references(() => event.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   body: text("body").notNull(),
+  // Operational dashboard metadata. Audience is enforced by every read API.
+  priority: text("priority").default("normal").notNull(), // normal | important | urgent
+  audience: text("audience").default("all").notNull(), // all | participants | coaches | organizers
   pinned: boolean("pinned").default(false).notNull(),
   authorId: text("author_id").references(() => user.id, { onDelete: "set null" }),
   createdAt: createdAt(),
+  updatedAt: timestamp("updated_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
 });
+
+/** Versioned external documents attached to an event. Replacements preserve prior rows. */
+export const eventDocument = pgTable(
+  "event_document",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    kind: text("kind").default("audit").notNull(), // audit (future document kinds may reuse this table)
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    summary: text("summary"),
+    findings: jsonb("findings").$type<string[]>().default([]).notNull(),
+    problems: jsonb("problems").$type<string[]>().default([]).notNull(),
+    version: integer("version").notNull(),
+    isCurrent: boolean("is_current").default(true).notNull(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique().on(t.eventId, t.kind, t.version),
+    index("event_document_current_idx").on(t.eventId, t.kind, t.isCurrent),
+  ]
+);
+
+/** Operational systems, data sources and tools made available to one event edition. */
+export const eventResource = pgTable(
+  "event_resource",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // scope | accessible | tool
+    name: text("name").notNull(),
+    category: text("category").notNull(),
+    description: text("description"),
+    url: text("url"),
+    accessLevel: text("access_level").default("event").notNull(), // public | event | restricted
+    availability: text("availability").default("available").notNull(), // available | limited | unavailable
+    ownerName: text("owner_name"),
+    position: integer("position").default(0).notNull(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => [index("event_resource_event_kind_idx").on(t.eventId, t.kind, t.position)]
+);
+
+/** Calendar activity for one edition. Cancelled rows remain for ICS clients and history. */
+export const scheduleItem = pgTable(
+  "schedule_item",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    startsAt: timestamp("starts_at").notNull(),
+    endsAt: timestamp("ends_at").notNull(),
+    location: text("location"),
+    kind: text("kind").default("other").notNull(), // launch | plenary | workshop | intergroup | deadline | deliverable | final | other
+    audience: text("audience").default("all").notNull(), // all | participants | coaches | organizers
+    required: boolean("required").default(false).notNull(),
+    status: text("status").default("scheduled").notNull(), // scheduled | cancelled
+    revision: integer("revision").default(0).notNull(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => [index("schedule_item_event_start_idx").on(t.eventId, t.startsAt)]
+);
+
+/** Revocable, user-scoped Outlook/ICS subscription. Only the token hash is stored. */
+export const calendarSubscription = pgTable(
+  "calendar_subscription",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    prefix: text("prefix").notNull(),
+    createdAt: createdAt(),
+    lastUsedAt: timestamp("last_used_at"),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (t) => [unique().on(t.eventId, t.userId), index("calendar_subscription_event_idx").on(t.eventId)]
+);
 
 /* ------------------------------------------------------------------ */
 /* Innolab idea preselection                                          */
@@ -283,13 +395,19 @@ export const pitch = pgTable(
       .$defaultFn(() => new Date())
       .notNull(),
   },
-  (t) => [index("pitch_event_status_idx").on(t.eventId, t.status)]
+  (t) => [
+    index("pitch_event_status_idx").on(t.eventId, t.status),
+    unique("pitch_event_author_unique").on(t.eventId, t.authorId),
+  ]
 );
 
 export const pitchVote = pgTable(
   "pitch_vote",
   {
     id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
     pitchId: text("pitch_id")
       .notNull()
       .references(() => pitch.id, { onDelete: "cascade" }),
@@ -298,7 +416,7 @@ export const pitchVote = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     createdAt: createdAt(),
   },
-  (t) => [unique().on(t.pitchId, t.voterId)]
+  (t) => [unique().on(t.eventId, t.voterId), unique().on(t.pitchId, t.voterId)]
 );
 
 /* ------------------------------------------------------------------ */
@@ -366,6 +484,40 @@ export const project = pgTable(
       .notNull(),
   },
   (t) => [index("project_event_status_idx").on(t.eventId, t.status)]
+);
+
+/**
+ * A participant's request to join a selected Innolab project. Membership is
+ * created only after the project owner or one of the event's coaches accepts.
+ */
+export const projectJoinRequest = pgTable(
+  "project_join_request",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    status: text("status").default("pending").notNull(), // pending | approved | rejected | cancelled
+    reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => [
+    unique().on(t.projectId, t.userId),
+    uniqueIndex("project_join_request_one_pending_per_event_user_idx")
+      .on(t.eventId, t.userId)
+      .where(sql`${t.status} = 'pending'`),
+    index("project_join_request_project_status_idx").on(t.projectId, t.status),
+  ]
 );
 
 /* ------------------------------------------------------------------ */
@@ -443,13 +595,20 @@ export const score = pgTable(
       .notNull()
       .references(() => project.id, { onDelete: "cascade" }),
     criteria: jsonb("criteria").$type<Record<string, number>>().notNull(),
+    favorite: boolean("favorite").default(false).notNull(),
     comment: text("comment"),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at")
       .$defaultFn(() => new Date())
       .notNull(),
   },
-  (t) => [unique().on(t.judgeId, t.projectId), index("score_event_idx").on(t.eventId)]
+  (t) => [
+    unique().on(t.judgeId, t.projectId),
+    uniqueIndex("score_one_favorite_per_judge_event_idx")
+      .on(t.eventId, t.judgeId)
+      .where(sql`${t.favorite} = true`),
+    index("score_event_idx").on(t.eventId),
+  ]
 );
 
 /** Pairwise comparison: a judge picked `winnerId` over `loserId` (Bradley–Terry). */
@@ -618,6 +777,30 @@ export const eventRelations = relations(event, ({ many }) => ({
   teams: many(team),
   projects: many(project),
   pitches: many(pitch),
+  documents: many(eventDocument),
+  resources: many(eventResource),
+  scheduleItems: many(scheduleItem),
+  calendarSubscriptions: many(calendarSubscription),
+}));
+
+export const eventDocumentRelations = relations(eventDocument, ({ one }) => ({
+  event: one(event, { fields: [eventDocument.eventId], references: [event.id] }),
+  creator: one(user, { fields: [eventDocument.createdBy], references: [user.id] }),
+}));
+
+export const eventResourceRelations = relations(eventResource, ({ one }) => ({
+  event: one(event, { fields: [eventResource.eventId], references: [event.id] }),
+  creator: one(user, { fields: [eventResource.createdBy], references: [user.id] }),
+}));
+
+export const scheduleItemRelations = relations(scheduleItem, ({ one }) => ({
+  event: one(event, { fields: [scheduleItem.eventId], references: [event.id] }),
+  creator: one(user, { fields: [scheduleItem.createdBy], references: [user.id] }),
+}));
+
+export const calendarSubscriptionRelations = relations(calendarSubscription, ({ one }) => ({
+  event: one(event, { fields: [calendarSubscription.eventId], references: [event.id] }),
+  user: one(user, { fields: [calendarSubscription.userId], references: [user.id] }),
 }));
 
 export const pitchRelations = relations(pitch, ({ one, many }) => ({
@@ -628,6 +811,7 @@ export const pitchRelations = relations(pitch, ({ one, many }) => ({
 }));
 
 export const pitchVoteRelations = relations(pitchVote, ({ one }) => ({
+  event: one(event, { fields: [pitchVote.eventId], references: [event.id] }),
   pitch: one(pitch, { fields: [pitchVote.pitchId], references: [pitch.id] }),
   voter: one(user, { fields: [pitchVote.voterId], references: [user.id] }),
 }));
@@ -665,6 +849,22 @@ export const projectRelations = relations(project, ({ one, many }) => ({
   scores: many(score),
   votes: many(vote),
   comments: many(comment),
+  joinRequests: many(projectJoinRequest),
+}));
+
+export const projectJoinRequestRelations = relations(projectJoinRequest, ({ one }) => ({
+  event: one(event, { fields: [projectJoinRequest.eventId], references: [event.id] }),
+  project: one(project, { fields: [projectJoinRequest.projectId], references: [project.id] }),
+  participant: one(user, {
+    relationName: "projectJoinRequestParticipant",
+    fields: [projectJoinRequest.userId],
+    references: [user.id],
+  }),
+  reviewer: one(user, {
+    relationName: "projectJoinRequestReviewer",
+    fields: [projectJoinRequest.reviewedBy],
+    references: [user.id],
+  }),
 }));
 
 export const assignmentRelations = relations(assignment, ({ one }) => ({
@@ -692,6 +892,7 @@ export type RubricCriterion = typeof rubricCriterion.$inferSelect;
 export type Team = typeof team.$inferSelect;
 export type TeamMember = typeof teamMember.$inferSelect;
 export type Project = typeof project.$inferSelect;
+export type ProjectJoinRequest = typeof projectJoinRequest.$inferSelect;
 export type Pitch = typeof pitch.$inferSelect;
 export type PitchVote = typeof pitchVote.$inferSelect;
 export type Assignment = typeof assignment.$inferSelect;
@@ -699,6 +900,10 @@ export type Score = typeof score.$inferSelect;
 export type Vote = typeof vote.$inferSelect;
 export type Comment = typeof comment.$inferSelect;
 export type Announcement = typeof announcement.$inferSelect;
+export type EventDocument = typeof eventDocument.$inferSelect;
+export type EventResource = typeof eventResource.$inferSelect;
+export type ScheduleItem = typeof scheduleItem.$inferSelect;
+export type CalendarSubscription = typeof calendarSubscription.$inferSelect;
 export type ApiToken = typeof apiToken.$inferSelect;
 export type AuditLog = typeof auditLog.$inferSelect;
 export type Webhook = typeof webhook.$inferSelect;

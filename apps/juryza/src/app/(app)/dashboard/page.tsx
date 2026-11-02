@@ -53,7 +53,7 @@ export default function DashboardPage() {
     queryKey: ["me", "overview"],
     queryFn: () => api.get<Overview>("/api/me/overview"),
   });
-  const organizer = hasAtLeast(viewer?.role, "organizer");
+  const canCreateEvents = hasAtLeast(viewer?.role, "judge");
   const now = Date.now();
   const toReview =
     data?.judging.reduce((n, j) => {
@@ -62,26 +62,26 @@ export default function DashboardPage() {
       if (locked) return n;
       return n + Math.max(0, j.assigned - j.scored);
     }, 0) ?? 0;
-  const firstName = viewer?.name.split(" ")[0] ?? "there";
+  const firstName = viewer?.name.split(" ")[0] ?? "vous";
 
   return (
     <>
       <PageHeader
-        eyebrow={new Intl.DateTimeFormat("en", {
+        eyebrow={new Intl.DateTimeFormat("fr-FR", {
           weekday: "long",
           month: "long",
           day: "numeric",
         }).format(new Date())}
-        title={`Welcome back, ${firstName}`}
-        description="Everything you're part of — events, projects, reviews — in one place."
+        title={`Bonjour ${firstName}`}
+        description="Vos événements Innovation Lab, projets et évaluations au même endroit."
         actions={
           <>
             <Button variant="outline" nativeButton={false} render={<Link href="/events" />}>
-              <Compass /> Explore events
+              <Compass /> Voir les événements
             </Button>
-            {organizer && (
+            {canCreateEvents && (
               <Button nativeButton={false} render={<Link href="/manage/new" />}>
-                <CalendarPlus /> New event
+                <CalendarPlus /> Nouvel événement
               </Button>
             )}
           </>
@@ -90,7 +90,7 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
-          label="Events joined"
+          label="Événements rejoints"
           value={isLoading ? "…" : (data?.participating.length ?? 0)}
           icon={Compass}
         />
@@ -100,13 +100,13 @@ export default function DashboardPage() {
           icon={FolderKanban}
         />
         <StatCard
-          label="Reviews to do"
+          label="Évaluations à faire"
           value={isLoading ? "…" : toReview}
           icon={Gavel}
-          hint={data?.judging.length ? `across ${data.judging.length} event(s)` : undefined}
+          hint={data?.judging.length ? `sur ${data.judging.length} événement(s)` : undefined}
         />
         <StatCard
-          label="Certificates"
+          label="Certificats"
           value={isLoading ? "…" : (data?.certificates.length ?? 0)}
           icon={Award}
         />
@@ -121,7 +121,7 @@ export default function DashboardPage() {
         <div className="grid gap-8 xl:grid-cols-[1fr_380px]">
           <div className="flex flex-col gap-8">
             {data && data.judging.length > 0 && (
-              <Section title="Judging" description="Projects assigned to you for review.">
+              <Section title="Évaluations" description="Tous les projets à évaluer en tant que coach.">
                 <div className="grid gap-3 md:grid-cols-2">
                   {data.judging.map((j) => {
                     const done = Math.min(j.scored, j.assigned);
@@ -138,16 +138,16 @@ export default function DashboardPage() {
                             {locked ? (
                               <Badge variant="secondary" className="gap-1 shrink-0">
                                 <Lock className="size-3" />
-                                {j.resultsPublished ? "Results published" : "Judging closed"}
+                                {j.resultsPublished ? "Résultats publiés" : "Évaluations closes"}
                               </Badge>
                             ) : complete ? (
                               <Badge className="gap-1 shrink-0">
-                                <CheckCircle2 className="size-3" /> All reviewed
+                                <CheckCircle2 className="size-3" /> Tout est évalué
                               </Badge>
                             ) : null}
                           </div>
                           <CardDescription>
-                            {j.scored} of {j.assigned} reviewed
+                            {j.scored} sur {j.assigned} évalués
                           </CardDescription>
                         </CardHeader>
                         <CardContent className="flex flex-col gap-3">
@@ -159,12 +159,12 @@ export default function DashboardPage() {
                             render={<Link href={`/judging/${j.slug}`} />}
                           >
                             {j.assigned === 0
-                              ? "Open console"
+                              ? "Ouvrir l’évaluation"
                               : complete || locked
-                                ? "Review scores"
+                                ? "Consulter les notes"
                                 : j.scored === 0
-                                  ? "Start reviewing"
-                                  : "Continue reviewing"}{" "}
+                                  ? "Commencer"
+                                  : "Continuer"}{" "}
                             <ArrowRight />
                           </Button>
                         </CardContent>
@@ -176,7 +176,7 @@ export default function DashboardPage() {
             )}
 
             <Section
-              title="Your events"
+              title="Vos événements"
               actions={
                 <Button
                   variant="ghost"
@@ -184,7 +184,7 @@ export default function DashboardPage() {
                   nativeButton={false}
                   render={<Link href="/events" />}
                 >
-                  Find more <ArrowRight />
+                  Voir tous <ArrowRight />
                 </Button>
               }
             >
@@ -201,7 +201,7 @@ export default function DashboardPage() {
                           </div>
                           <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
                             <UsersRound className="size-3.5" />
-                            {e.teamName ? `Team ${e.teamName}` : "No team yet"}
+                            {e.teamName ? `Projet ${e.teamName}` : "Aucun projet rejoint"}
                           </p>
                           <NextMilestone event={e} className="text-xs" />
                         </CardContent>
@@ -215,23 +215,23 @@ export default function DashboardPage() {
                     <EmptyMedia variant="icon">
                       <Compass />
                     </EmptyMedia>
-                    <EmptyTitle>You haven't joined an event yet</EmptyTitle>
+                    <EmptyTitle>Vous n’avez encore rejoint aucun événement</EmptyTitle>
                     <EmptyDescription>
-                      Browse open hackathons, register, and form a team.
+                      Consultez les événements Innovation Lab ouverts et rejoignez un projet retenu.
                     </EmptyDescription>
                   </EmptyHeader>
                   <EmptyContent>
                     <Button nativeButton={false} render={<Link href="/events" />}>
-                      Explore events
+                      Voir les événements
                     </Button>
                   </EmptyContent>
                 </Empty>
               )}
             </Section>
 
-            {organizer && (
+            {canCreateEvents && (
               <Section
-                title="Events you organize"
+                title="Événements que vous organisez"
                 actions={
                   <Button
                     variant="ghost"
@@ -239,7 +239,7 @@ export default function DashboardPage() {
                     nativeButton={false}
                     render={<Link href="/manage" />}
                   >
-                    Manage all <ArrowRight />
+                    Tout gérer <ArrowRight />
                   </Button>
                 }
               >
@@ -256,10 +256,10 @@ export default function DashboardPage() {
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-medium">{e.name}</p>
                               <p className="text-muted-foreground text-xs">
-                                {e.projects} projects · {e.participants} participants
+                                {e.projects} projets · {e.participants} participants
                               </p>
                             </div>
-                            {e.visibility === "draft" && <Badge variant="outline">Draft</Badge>}
+                            {e.visibility === "draft" && <Badge variant="outline">Brouillon</Badge>}
                             <PhaseBadge event={e} className="hidden sm:inline-flex" />
                           </Link>
                         </li>
@@ -269,14 +269,14 @@ export default function DashboardPage() {
                 ) : (
                   <Empty className="border">
                     <EmptyHeader>
-                      <EmptyTitle>No events yet</EmptyTitle>
+                      <EmptyTitle>Aucun événement</EmptyTitle>
                       <EmptyDescription>
-                        Set up your first hackathon in a couple of minutes.
+                        Créez votre premier événement Innovation Lab en quelques minutes.
                       </EmptyDescription>
                     </EmptyHeader>
                     <EmptyContent>
                       <Button nativeButton={false} render={<Link href="/manage/new" />}>
-                        <CalendarPlus /> Create an event
+                        <CalendarPlus /> Créer un événement
                       </Button>
                     </EmptyContent>
                   </Empty>
@@ -286,7 +286,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex flex-col gap-8">
-            <Section title="Your projects">
+            <Section title="Vos projets">
               {data?.projects.length ? (
                 <div className="flex flex-col gap-2">
                   {data.projects.map((p) => (
@@ -295,7 +295,7 @@ export default function DashboardPage() {
                         <div className="min-w-0">
                           <p className="truncate font-medium">{p.title}</p>
                           <p className="text-muted-foreground truncate text-xs">
-                            {p.eventName} · edited {relativeTime(p.updatedAt)}
+                            {p.eventName} · modifié {relativeTime(p.updatedAt)}
                           </p>
                         </div>
                         <Badge
@@ -312,7 +312,7 @@ export default function DashboardPage() {
                           nativeButton={false}
                           render={<Link href={`/projects/${p.id}`} />}
                         >
-                          <PencilLine /> Open editor
+                          <PencilLine /> Ouvrir l’éditeur
                         </Button>
                       </CardContent>
                     </Card>
@@ -320,13 +320,13 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <p className="text-muted-foreground text-sm">
-                  Projects you work on appear here once your team starts one.
+                  Les projets que vous rejoignez apparaîtront ici après la sélection des pitchs.
                 </p>
               )}
             </Section>
 
             {data && data.certificates.length > 0 && (
-              <Section title="Certificates">
+              <Section title="Certificats">
                 <div className="flex flex-col gap-2">
                   {data.certificates.map((c) => (
                     <Link

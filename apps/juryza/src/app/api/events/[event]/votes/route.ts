@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { db, project, teamMember, vote } from "@/lib/db";
 import { id } from "@/lib/ids";
+import { isInnolab } from "@/lib/innolab";
 import { votingIsOpen } from "@/lib/phase";
 import { audit } from "@/lib/server/audit";
 import { loadEvent, loadManagedEvent } from "@/lib/server/events";
@@ -43,6 +44,9 @@ const body = z.object({ projectId: z.string().min(1), votes: z.number().int().mi
 export const POST = handle<P>(async (req, { event: ref }) => {
   const me = await resolveIdentity(req);
   const e = await loadEvent(ref, me);
+  if (isInnolab(e)) {
+    throw forbidden("Innolab projects are evaluated only by appointed judges");
+  }
   if (!votingIsOpen(e)) throw forbidden("Voting is not open for this event");
   // Write-up mode collects public input with no counted ballot; the panel
   // decides, so casting a vote is refused (the tally is also withheld below).

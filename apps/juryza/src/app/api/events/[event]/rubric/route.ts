@@ -6,7 +6,7 @@ import { id } from "@/lib/ids";
 import { audit } from "@/lib/server/audit";
 import { loadEvent, loadManagedEvent } from "@/lib/server/events";
 import { badRequest, handle, readBody } from "@/lib/server/http";
-import { requireUser, resolveIdentity } from "@/lib/server/identity";
+import { requireRole, resolveIdentity } from "@/lib/server/identity";
 
 type P = { event: string };
 
@@ -48,7 +48,7 @@ const body = z.object({
 });
 
 export const PUT = handle<P>(async (req, { event: ref }) => {
-  const me = await requireUser(req);
+  const me = await requireRole(req, "admin");
   const e = await loadManagedEvent(ref, me);
   const { criteria } = await readBody(req, body);
   if (new Set(criteria.map((c) => c.key)).size !== criteria.length) {

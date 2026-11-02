@@ -20,6 +20,7 @@ import {
 } from "@juryza/ui/components/ui/sidebar";
 
 import { LogoMark } from "@/components/brand";
+import { useI18n } from "@/components/locale-provider";
 import { UserAvatar } from "@/components/user-avatar";
 import { UserMenu } from "@/components/user-menu";
 import type { Viewer } from "@/components/viewer";
@@ -63,6 +64,7 @@ function Groups({ groups, pathname }: { groups: NavGroup[]; pathname: string }) 
 export function AppSidebar({ viewer }: { viewer: Viewer }) {
   const pathname = usePathname();
   const slug = manageSlug(pathname);
+  const { t } = useI18n();
 
   return (
     <Sidebar collapsible="icon" variant="inset">
@@ -72,10 +74,8 @@ export function AppSidebar({ viewer }: { viewer: Viewer }) {
             <SidebarMenuButton size="lg" render={<Link href="/dashboard" />}>
               <LogoMark className="size-8" />
               <span className="flex flex-col leading-tight">
-                <span className="font-semibold">Juryza</span>
-                <span className="text-muted-foreground text-xs capitalize">
-                  {viewer.role} workspace
-                </span>
+                <span className="font-semibold">Innovation Lab</span>
+                <span className="text-muted-foreground text-xs">{t("site.internalPlatform")}</span>
               </span>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -88,26 +88,26 @@ export function AppSidebar({ viewer }: { viewer: Viewer }) {
             <SidebarGroup>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="All my events" render={<Link href="/manage" />}>
+                  <SidebarMenuButton tooltip={t("nav.allEvents")} render={<Link href="/manage" />}>
                     <ArrowLeft />
-                    <span>All my events</span>
+                    <span>{t("nav.allEvents")}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    tooltip="View public page"
+                    tooltip={t("nav.eventPage")}
                     render={<Link href={`/e/${slug}`} target="_blank" />}
                   >
                     <ExternalLink />
-                    <span>View public page</span>
+                    <span>{t("nav.eventPage")}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroup>
-            <Groups groups={manageNav(slug)} pathname={pathname} />
+            <Groups groups={manageNav(slug, t)} pathname={pathname} />
           </>
         ) : (
-          <Groups groups={mainNav(viewer)} pathname={pathname} />
+          <Groups groups={mainNav(viewer, t)} pathname={pathname} />
         )}
       </SidebarContent>
 

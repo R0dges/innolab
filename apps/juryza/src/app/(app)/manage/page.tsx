@@ -97,28 +97,28 @@ function useManagedEvents(admin: boolean, enabled: boolean) {
 
 export default function ManageEventsPage() {
   const viewer = useViewer();
-  const organizer = hasAtLeast(viewer?.role, "organizer");
+  const coach = hasAtLeast(viewer?.role, "judge");
   const admin = viewer?.role === "admin";
-  const { data, isLoading, error } = useManagedEvents(admin, organizer);
+  const { data, isLoading, error } = useManagedEvents(admin, coach);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
 
-  if (!organizer) {
+  if (!coach) {
     return (
       <Empty className="border">
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <ShieldAlert />
           </EmptyMedia>
-          <EmptyTitle>Organizer role required</EmptyTitle>
+          <EmptyTitle>Rôle de coach nécessaire</EmptyTitle>
           <EmptyDescription>
-            Creating and running events is available to organizers. Ask a platform admin to upgrade
-            your account, or explore events you can join in the meantime.
+            Seuls les coachs peuvent créer et conduire des événements. Un administrateur peut
+            attribuer ce rôle à votre compte.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
           <Button variant="outline" nativeButton={false} render={<Link href="/events" />}>
-            Explore events
+            Voir les événements
           </Button>
         </EmptyContent>
       </Empty>
@@ -137,34 +137,34 @@ export default function ManageEventsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Organize"
-        title="My events"
+        eyebrow="Organiser"
+        title="Mes événements"
         description={
           admin
-            ? "Every event on this Juryza instance — you're an admin."
-            : "Events you organize. Open one to run its console."
+            ? "Tous les événements Innovation Lab de cette instance."
+            : "Les événements que vous accompagnez comme coach."
         }
         actions={
           <Button nativeButton={false} render={<Link href="/manage/new" />}>
-            <CalendarPlus /> New event
+            <CalendarPlus /> Nouvel événement
           </Button>
         }
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
-          label="Events"
+          label="Événements"
           value={isLoading ? "…" : formatNumber(data?.length ?? 0)}
           icon={Gauge}
         />
         <StatCard
-          label="Live now"
+          label="En cours"
           value={isLoading ? "…" : formatNumber(live)}
-          hint="Published, results pending"
+          hint="Publiés, résultats en attente"
           icon={ArrowRight}
         />
         <StatCard
-          label="Projects submitted"
+          label="Projets"
           value={isLoading ? "…" : formatNumber(totalProjects)}
           icon={FolderKanban}
         />
@@ -177,7 +177,7 @@ export default function ManageEventsPage() {
 
       {error ? (
         <Alert variant="destructive">
-          <AlertTitle>Couldn't load your events</AlertTitle>
+          <AlertTitle>Impossible de charger les événements</AlertTitle>
           <AlertDescription>{error.message}</AlertDescription>
         </Alert>
       ) : isLoading ? (
@@ -192,15 +192,15 @@ export default function ManageEventsPage() {
             <EmptyMedia variant="icon">
               <CalendarPlus />
             </EmptyMedia>
-            <EmptyTitle>No events yet</EmptyTitle>
+            <EmptyTitle>Aucun événement</EmptyTitle>
             <EmptyDescription>
-              Set up your first hackathon in a couple of minutes — name, dates, tracks and voting
-              rules. It stays a draft until you publish it.
+              Préparez votre premier Innovation Lab : informations, calendrier, axes et règles du
+              parcours. Il restera en brouillon jusqu’à sa publication.
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
             <Button nativeButton={false} render={<Link href="/manage/new" />}>
-              <CalendarPlus /> Create an event
+              <CalendarPlus /> Créer un événement
             </Button>
           </EmptyContent>
         </Empty>
@@ -214,8 +214,8 @@ export default function ManageEventsPage() {
               <InputGroupInput
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Filter events…"
-                aria-label="Filter events"
+                placeholder="Filtrer les événements…"
+                aria-label="Filtrer les événements"
               />
             </InputGroup>
             <ToggleGroup
@@ -235,7 +235,7 @@ export default function ManageEventsPage() {
 
           {rows.length === 0 ? (
             <p className="text-muted-foreground py-8 text-center text-sm">
-              No events match “{query}”.
+              Aucun événement ne correspond à « {query} ».
             </p>
           ) : view === "grid" ? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -245,7 +245,7 @@ export default function ManageEventsPage() {
                     <EventCover hue={e.hue} className="h-24">
                       <div className="absolute top-3 left-3 flex gap-1.5">
                         <Badge variant={e.visibility === "draft" ? "secondary" : "default"}>
-                          {e.visibility === "draft" ? "Draft" : "Published"}
+                          {e.visibility === "draft" ? "Brouillon" : "Publié"}
                         </Badge>
                       </div>
                     </EventCover>
@@ -267,7 +267,7 @@ export default function ManageEventsPage() {
                     </div>
                     <dl className="grid grid-cols-2 gap-2 text-sm">
                       <div className="bg-muted/50 rounded-lg px-3 py-2">
-                        <dt className="text-muted-foreground text-xs">Projects</dt>
+                        <dt className="text-muted-foreground text-xs">Projets</dt>
                         <dd className="font-semibold tabular-nums">{formatNumber(e.projects)}</dd>
                       </div>
                       <div className="bg-muted/50 rounded-lg px-3 py-2">
@@ -286,7 +286,7 @@ export default function ManageEventsPage() {
                       nativeButton={false}
                       render={<Link href={`/manage/${e.slug}`} />}
                     >
-                      <Gauge /> Console
+                      <Gauge /> Gérer
                     </Button>
                     <Button
                       size="sm"
@@ -295,7 +295,7 @@ export default function ManageEventsPage() {
                       nativeButton={false}
                       render={<Link href={`/e/${e.slug}`} target="_blank" />}
                     >
-                      <ExternalLink /> Public page
+                      <ExternalLink /> Page de l’événement
                     </Button>
                   </CardFooter>
                 </Card>
@@ -307,11 +307,11 @@ export default function ManageEventsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Event</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Projects</TableHead>
+                      <TableHead>Événement</TableHead>
+                      <TableHead>Statut</TableHead>
+                      <TableHead className="text-right">Projets</TableHead>
                       <TableHead className="text-right">Participants</TableHead>
-                      <TableHead>Next</TableHead>
+                      <TableHead>Prochaine étape</TableHead>
                       <TableHead className="w-0" />
                     </TableRow>
                   </TableHeader>
@@ -326,7 +326,7 @@ export default function ManageEventsPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1.5">
-                            {e.visibility === "draft" && <Badge variant="outline">Draft</Badge>}
+                            {e.visibility === "draft" && <Badge variant="outline">Brouillon</Badge>}
                             <PhaseBadge event={e} />
                           </div>
                         </TableCell>
@@ -347,12 +347,12 @@ export default function ManageEventsPage() {
                               nativeButton={false}
                               render={<Link href={`/manage/${e.slug}`} />}
                             >
-                              Console
+                              Gérer
                             </Button>
                             <Button
                               size="icon-sm"
                               variant="ghost"
-                              aria-label="Public page"
+                              aria-label="Page de l’événement"
                               nativeButton={false}
                               render={<Link href={`/e/${e.slug}`} target="_blank" />}
                             >

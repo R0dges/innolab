@@ -12,6 +12,7 @@ import {
   EyeOff,
   FlameKindling,
   Globe,
+  Heart,
   Lock,
   Minus,
   Scale,
@@ -392,7 +393,8 @@ function Ranking({ data }: { data: Results }) {
           Ranked by <span className="text-foreground font-medium">normalized mean</span> — each
           judge's scores are re-centred so a harsh or generous judge can't decide the outcome. The{" "}
           <span className="text-foreground font-medium">Δ</span> column shows how far each project
-          moved versus ranking by raw averages: {countProjects(moved)} changed place.
+          moved versus ranking by raw averages: {countProjects(moved)} changed place. Each coach's
+          coup de cœur adds one point to the rubric total before normalization.
           {unscored > 0 && ` ${unscored} project(s) have no scores yet and are unranked.`}
         </p>
         {tracks.length > 1 && (
@@ -424,7 +426,8 @@ function Ranking({ data }: { data: Results }) {
                 <TableHead>Project</TableHead>
                 <TableHead>Track</TableHead>
                 <TableHead className="text-right">Reviews</TableHead>
-                <TableHead className="text-right">Raw mean</TableHead>
+                <TableHead className="text-right">Coup de cœur</TableHead>
+                <TableHead className="text-right">Raw + bonus</TableHead>
                 <TableHead className="text-right">Normalized</TableHead>
                 <TableHead className="text-right">Raw rank</TableHead>
                 <TableHead className="text-right">Δ</TableHead>
@@ -456,6 +459,11 @@ function Ranking({ data }: { data: Results }) {
                     )}
                   >
                     {p.reviews}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    <span className="inline-flex items-center gap-1">
+                      <Heart className="text-primary size-3.5" /> {p.favorites}
+                    </span>
                   </TableCell>
                   <TableCell className="text-muted-foreground text-right tabular-nums">
                     {fmt(p.raw)}
@@ -580,6 +588,10 @@ function Calibration({ judges }: { judges: JudgeRow[] }) {
               read at face value.
             </p>
             <ol className="flex list-decimal flex-col gap-2 pl-4">
+              <li>
+                Each coach may give one project their coup de cœur. It adds one point to that
+                coach's rubric total before normalization.
+              </li>
               <li>
                 <span className="text-foreground">z-score</span> — how many of the judge's own
                 standard deviations above or below their mean this score sits:

@@ -31,7 +31,6 @@ const TAGS = {
   Projects: "Submissions: the public gallery, drafts, editing and similarity.",
   Comments: "The public discussion thread on each submitted project.",
   Judging: "The judging panel, assignments and a judge's own rubric scores.",
-  Pairwise: "Gavel-style pairwise judging fitted with Bradley–Terry.",
   Voting: "Quadratic community voting: ballots, votes and email verification.",
   Results: "The leaderboard (hidden until published) and side-by-side comparison.",
   "Organizer data":
@@ -226,7 +225,6 @@ const bodies = {
     email,
     trackIds: z.array(z.string()).max(30).default([]).describe("Empty = all tracks."),
   }),
-  pairwise: z.object({ winnerId: z.string().min(1), loserId: z.string().min(1) }),
   prizes: z.object({
     prizes: z
       .array(
@@ -335,6 +333,10 @@ const bodies = {
     criteria: z
       .record(z.string(), z.number().int().min(1).max(5))
       .describe('A 1–5 mark for every rubric key, e.g. `{ "impact": 4 }`.'),
+    favorite: z
+      .boolean()
+      .default(false)
+      .describe("The coach's single +1 coup de cœur for this event."),
     comment: z.string().max(4000).nullish(),
   }),
   me: z.object({
@@ -367,7 +369,8 @@ const bodies = {
 };
 
 const ORGANIZERS =
-  "**Organizers only:** 403 unless the caller created this event (or is an admin).";
+  "**Event managers only:** 403 unless the caller created this event as a coach (or is an admin).";
+const ADMINS = "**Admins only:** 403 for every other platform role.";
 
 /* ─────────────────────────────────── Auth ─────────────────────────────────── */
 
@@ -421,7 +424,7 @@ op("post", "/api/events", {
   tag: "Events",
   summary: "Create an event",
   description:
-    'Requires the `organizer` platform role (403 otherwise). Starts as a draft unless `visibility: "published"`, owned by the caller, with a default four-criterion rubric and the given `tracks`. 409 if the slug is taken.',
+    'Requires the `judge` (coach) platform role or above (403 otherwise). Starts as a draft unless `visibility: "published"`, owned by the caller, with the default six-criterion Innovation Lab rubric and the given `tracks`. 409 if the slug is taken.',
   body: eventInput,
   status: 201,
   returns: "`{ id, slug }`.",
@@ -528,7 +531,7 @@ op("get", "/api/events/{event}/rubric", {
 op("put", "/api/events/{event}/rubric", {
   tag: "Tracks & rubric",
   summary: "Replace the rubric",
-  description: `${ORGANIZERS} Rows are matched by \`key\` (what judges' marks are stored against). Weights are relative and results recompute on read, so re-weighting never invalidates marks. 400 on duplicate keys.`,
+  description: `${ADMINS} Rows are matched by \`key\` (what judges' marks are stored against). Weights are relative and results recompute on read, so re-weighting never invalidates marks. 400 on duplicate keys.`,
   body: bodies.rubric,
   returns: "`{ criteria: RubricCriterion[] }`.",
   errors: [403],
@@ -599,9 +602,48 @@ op("post", "/api/teams/{id}/invite", {
   tag: "Teams",
   params: { id: "Team id." },
   summary: "Reset the invite link",
-  description: "Team owner only (403 otherwise). The old link stops working immediately.",
+  description:
+    "Standard Juryza events only. Team owner only (403 otherwise). Innolab projects use reviewed join requests instead.",
   returns: "`{ inviteUrl }`.",
   errors: [403],
+});
+op("get", "/api/teams/{id}/join", {
+  tag: "Teams",
+  params: { id: "Innolab project team id." },
+  summary: "List pending project join requests",
+  description: "Project owner, event coach or event manager only.",
+  returns: "`{ requests: [{ id, status, createdAt, participant }] }`.",
+  errors: [403, 404],
+});
+op("post", "/api/teams/{id}/join", {
+  tag: "Teams",
+  params: { id: "Team id." },
+  summary: "Request to join a selected Innolab project",
+  description:
+    "Creates a pending request; it never grants membership immediately. The caller must be registered, belong to no project in this event and have no other pending request in it.",
+  returns: "`{ requestId, status: 'pending', alreadyRequested }`.",
+  errors: [403, 404, 409],
+});
+op("patch", "/api/teams/{id}/join", {
+  tag: "Teams",
+  params: { id: "Innolab project team id." },
+  summary: "Review a project join request",
+  description:
+    "Project owner, event coach or event manager only. Approval adds the participant to the project; rejection leaves them free to request another project.",
+  body: z.object({
+    requestId: z.string().min(1),
+    decision: z.enum(["approve", "reject"]),
+  }),
+  returns: "`{ status: 'approved' | 'rejected', alreadyMember? }`.",
+  errors: [403, 404, 409],
+});
+op("delete", "/api/teams/{id}/join", {
+  tag: "Teams",
+  params: { id: "Innolab project team id." },
+  summary: "Cancel one's pending project join request",
+  description: "Cancels the authenticated participant's pending request for this project.",
+  returns: "`{ status: 'cancelled' }`.",
+  errors: [404],
 });
 op("delete", "/api/teams/{id}/members/{userId}", {
   tag: "Teams",
@@ -625,7 +667,7 @@ op("post", "/api/teams/join", {
   tag: "Teams",
   summary: "Join a team",
   description:
-    "The invite link is the capability — no accept round-trip. Idempotent for current members. 409 if the caller is on another team in the event; 403 after the submission deadline or when the team is full.",
+    "The invite link is the capability — no accept round-trip. Idempotent for current members. 409 if the caller is on another team in the event or the team is full; 403 after the submission deadline.",
   body: bodies.joinTeam,
   returns: "`{ teamId, eventSlug, alreadyMember }`.",
   errors: [403, 404, 409],
@@ -732,15 +774,15 @@ op("delete", "/api/comments/{id}", {
 op("get", "/api/events/{event}/judges", {
   tag: "Judging",
   summary: "The judging panel",
-  description: `${ORGANIZERS} Each judge's tracks and progress (assigned vs scored), plus pending invitations with their links.`,
+  description: `${ORGANIZERS} Each judge's tracks and progress (assigned vs scored). For Innolab, only platform admins receive and manage pending invitations.`,
   returns:
-    "`{ judges: { id, name, email, username, image, trackIds, joinedAt, assigned, scored, lastScoredAt }[], invites: { id, email, trackIds, createdAt, inviteUrl }[] }`.",
+    "`{ canManage, judges: { id, name, email, username, image, trackIds, joinedAt, assigned, scored, lastScoredAt }[], invites: { id, email, trackIds, createdAt, inviteUrl }[] }`.",
   errors: [403],
 });
 op("post", "/api/events/{event}/judges", {
   tag: "Judging",
   summary: "Invite a judge",
-  description: `${ORGANIZERS} An existing account joins the panel immediately (a participant is promoted to judge); otherwise an invitation link is created for the organizer to share.`,
+  description: `${ORGANIZERS} For Innolab this action is restricted to platform admins. An existing account joins the panel immediately; otherwise an invitation link is created.`,
   body: bodies.judgeInvite,
   status: 201,
   returns: '`{ status: "added", userId, name }` or `{ status: "invited", inviteUrl }`.',
@@ -750,7 +792,7 @@ op("patch", "/api/events/{event}/judges/{userId}", {
   tag: "Judging",
   params: { userId: "The judge's user id." },
   summary: "Change a judge's tracks",
-  description: `${ORGANIZERS} 404 if the user is not on the panel.`,
+  description: `${ORGANIZERS} For Innolab this action is restricted to platform admins. 404 if the user is not on the panel.`,
   body: bodies.judgeTracks,
   returns: "`{ ok: true }`.",
   errors: [403],
@@ -759,7 +801,7 @@ op("delete", "/api/events/{event}/judges/{userId}", {
   tag: "Judging",
   params: { userId: "The judge's user id, or a pending invitation id (`inv_…`) to revoke it." },
   summary: "Remove a judge",
-  description: `${ORGANIZERS} Unscored assignments are released; scores already given are kept as part of the record.`,
+  description: `${ORGANIZERS} For Innolab this action is restricted to platform admins. Unscored assignments are released; scores already given are kept as part of the record.`,
   returns: "`{ ok: true }`.",
   errors: [403],
 });
@@ -827,39 +869,10 @@ op("post", "/api/judge/scores", {
   tag: "Judging",
   summary: "Save a score",
   description:
-    "Creates or updates the caller's score. 403 unless the project is assigned to the caller, and 403 after `judgingClose` or once results are published. 400 unless there is a mark for every rubric key and no unknown keys.",
+    "Creates or updates the caller's score. 403 unless the project is assigned to the caller, and 403 after `judgingClose` or once results are published. 400 unless there is a mark for every rubric key and no unknown keys. Setting `favorite: true` moves the caller's single event-level +1 bonus to this project.",
   body: bodies.score,
   returns: "`{ ok: true }`.",
   errors: [403],
-});
-
-/* ───────────────────────────────── Pairwise ───────────────────────────────── */
-
-op("get", "/api/events/{event}/pairwise", {
-  tag: "Pairwise",
-  summary: "Next pair to compare",
-  description:
-    "403 unless the caller is on the event's panel. Picks, among the caller's assigned projects, the unseen pair that carries the most information (least-compared projects, closest current strengths). `pair` is null once every pair has been compared.",
-  returns:
-    "`{ event: { slug, name }, pair: [Project, Project] | null, progress: { compared, possible } }`.",
-  errors: [403],
-});
-op("post", "/api/events/{event}/pairwise", {
-  tag: "Pairwise",
-  summary: "Record a verdict",
-  description:
-    "403 unless the caller is on the panel and both projects are assigned to them; 403 once results are published. 400 if `winnerId` equals `loserId`.",
-  body: bodies.pairwise,
-  returns: "`{ ok: true }`.",
-  errors: [403],
-});
-op("delete", "/api/events/{event}/pairwise", {
-  tag: "Pairwise",
-  summary: "Undo last verdict",
-  description:
-    "403 unless the caller is on the panel; 403 once results are published. Deletes the judge's most recent pairwise comparison in this event.",
-  returns: "`{ ok: true, undone: { id, winnerId, loserId } }`.",
-  errors: [400, 403],
 });
 
 /* ────────────────────────────────── Voting ────────────────────────────────── */
@@ -1183,6 +1196,10 @@ const WEBHOOK_DATA: Record<(typeof WEBHOOK_EVENTS)[number] | "ping", [string, Js
   "event.created": ["An event was created.", { name: str, slug: str }],
   "event.updated": ["Event settings changed.", { fields: { type: "array", items: str } }],
   "team.created": ["A team was formed.", { teamId: str, name: str }],
+  "team.join_requested": [
+    "A participant requested to join an Innolab project.",
+    { teamId: str, userId: str, projectId: str },
+  ],
   "team.joined": ["Someone joined a team.", { teamId: str, userId: str }],
   "project.submitted": ["A project was submitted.", { projectId: str, title: str }],
   "project.updated": ["A project was edited.", { projectId: str }],

@@ -15,10 +15,10 @@ import {
   FolderGit2,
   Gavel,
   Globe,
+  Heart,
   Lock,
   Search,
   ShieldCheck,
-  Shuffle,
   Video,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -27,6 +27,7 @@ import { Alert, AlertDescription, AlertTitle } from "@juryza/ui/components/ui/al
 import { Badge } from "@juryza/ui/components/ui/badge";
 import { Button } from "@juryza/ui/components/ui/button";
 import { Card, CardContent } from "@juryza/ui/components/ui/card";
+import { Checkbox } from "@juryza/ui/components/ui/checkbox";
 import {
   Empty,
   EmptyContent,
@@ -35,6 +36,12 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@juryza/ui/components/ui/empty";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "@juryza/ui/components/ui/field";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@juryza/ui/components/ui/input-group";
 import { Kbd } from "@juryza/ui/components/ui/kbd";
 import { Progress } from "@juryza/ui/components/ui/progress";
@@ -82,6 +89,7 @@ interface QueueItem {
   trackName: string | null;
   batch: number;
   criteria: Record<string, number> | null;
+  favorite: boolean | null;
   comment: string | null;
   scoredAt: string | null;
   scored: boolean;
@@ -99,14 +107,15 @@ interface QueueDetail {
 type Filter = "all" | "todo" | "done";
 interface Draft {
   marks: Record<string, number>;
+  favorite: boolean;
   comment: string;
 }
 
 const SCALE = [
-  { value: 1, label: "Poor" },
-  { value: 2, label: "Fair" },
-  { value: 3, label: "Good" },
-  { value: 4, label: "Great" },
+  { value: 1, label: "Insuffisant" },
+  { value: 2, label: "Passable" },
+  { value: 3, label: "Bon" },
+  { value: 4, label: "Très bon" },
   { value: 5, label: "Excellent" },
 ];
 
@@ -141,16 +150,18 @@ export default function ScoringConsolePage() {
   const draft: Draft = current
     ? (drafts[current.projectId] ?? {
         marks: current.criteria ?? {},
+        favorite: current.favorite ?? false,
         comment: current.comment ?? "",
       })
-    : { marks: {}, comment: "" };
+    : { marks: {}, favorite: false, comment: "" };
   const complete = criteria.length > 0 && criteria.every((c) => draft.marks[c.key] !== undefined);
-  const preview = rawScore(draft.marks, criteria);
+  const preview = rawScore(draft.marks, criteria, draft.favorite);
   const totalWeight = criteria.reduce((n, c) => n + c.weight, 0) || 1;
   const dirty =
     current !== null &&
     drafts[current.projectId] !== undefined &&
     (JSON.stringify(draft.marks) !== JSON.stringify(current.criteria ?? {}) ||
+      draft.favorite !== (current.favorite ?? false) ||
       draft.comment !== (current.comment ?? ""));
 
   const needle = q.trim().toLowerCase();
@@ -180,22 +191,25 @@ export default function ScoringConsolePage() {
     mutationFn: (v: {
       projectId: string;
       criteria: Record<string, number>;
+      favorite: boolean;
       comment: string | null;
     }) => api.post("/api/judge/scores", v),
     onSuccess: (_res, v) => {
       queryClient.setQueryData<QueueDetail>(key, (old) => {
         if (!old) return old;
-        const nextItems = old.items.map((i) =>
-          i.projectId === v.projectId
-            ? {
-                ...i,
-                criteria: v.criteria,
-                comment: v.comment,
-                scoredAt: new Date().toISOString(),
-                scored: true,
-              }
-            : i
-        );
+        const nextItems = old.items.map((i) => {
+          if (i.projectId === v.projectId) {
+            return {
+              ...i,
+              criteria: v.criteria,
+              favorite: v.favorite,
+              comment: v.comment,
+              scoredAt: new Date().toISOString(),
+              scored: true,
+            };
+          }
+          return v.favorite && i.favorite ? { ...i, favorite: false } : i;
+        });
         return { ...old, items: nextItems, scored: nextItems.filter((i) => i.scored).length };
       });
       setDrafts((d) => {
@@ -209,11 +223,11 @@ export default function ScoringConsolePage() {
       const ordered = [...items.slice(idx + 1), ...items.slice(0, idx)];
       const next = ordered.find((i) => !i.scored && i.projectId !== v.projectId);
       if (next) {
-        toast.success("Score saved", { description: `Next up: ${next.title}` });
+      toast.success("Évaluation enregistrée", { description: `Projet suivant : ${next.title}` });
         select(next.projectId);
       } else {
         setSelectedId(v.projectId);
-        toast.success("Score saved — that's every project in your queue");
+      toast.success("Évaluation enregistrée — tous les projets sont évalués");
       }
     },
     onError: (e) => toast.error(e.message),
@@ -224,6 +238,7 @@ export default function ScoringConsolePage() {
     save.mutate({
       projectId: current.projectId,
       criteria: draft.marks,
+      favorite: draft.favorite,
       comment: draft.comment.trim() || null,
     });
   };
@@ -275,12 +290,12 @@ export default function ScoringConsolePage() {
           </EmptyMedia>
           <EmptyTitle>Can't open this console</EmptyTitle>
           <EmptyDescription>
-            {error?.message ?? "You may not be on this event's judging panel."}
+            {error?.message ?? "Vous n’êtes peut-être pas coach sur cet événement."}
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
           <Button variant="outline" nativeButton={false} render={<Link href="/judging" />}>
-            <ArrowLeft /> Judging queue
+            <ArrowLeft /> Évaluations
           </Button>
         </EmptyContent>
       </Empty>
@@ -301,30 +316,20 @@ export default function ScoringConsolePage() {
               href="/judging"
               className="text-muted-foreground inline-flex items-center gap-1 text-sm hover:underline"
             >
-              <ArrowLeft className="size-3.5" /> Judging queue
+              <ArrowLeft className="size-3.5" /> Évaluations
             </Link>
             <h1 className="truncate text-2xl font-semibold tracking-tight">{data.event.name}</h1>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              nativeButton={false}
-              render={<Link href={`/judging/${slug}/pairwise`} />}
-            >
-              <Shuffle /> Pairwise mode
-            </Button>
-          </div>
         </div>
         <div className="flex items-center gap-3">
-          <Progress value={pct} className="flex-1" aria-label="Review progress" />
+              <Progress value={pct} className="flex-1" aria-label="Progression des évaluations" />
           <span className="shrink-0 text-sm font-medium tabular-nums">
-            {done} of {items.length} reviewed
+                {done} sur {items.length} évalués
           </span>
         </div>
         {data.event.judgingClose && !locked && (
           <p className="text-muted-foreground -mt-2 text-xs">
-            Judging closes {relativeTime(data.event.judgingClose)} ·{" "}
+            Clôture des évaluations {relativeTime(data.event.judgingClose)} ·{" "}
             {formatDateTime(data.event.judgingClose)}
           </p>
         )}
@@ -333,9 +338,9 @@ export default function ScoringConsolePage() {
       {locked && (
         <Alert>
           <Lock />
-          <AlertTitle>Judging is closed</AlertTitle>
+          <AlertTitle>Les évaluations sont closes</AlertTitle>
           <AlertDescription>
-            Scores are final — you can review what you submitted, but not change it.
+                Les notes sont définitives : vous pouvez les consulter, mais plus les modifier.
           </AlertDescription>
         </Alert>
       )}
@@ -348,7 +353,7 @@ export default function ScoringConsolePage() {
             </EmptyMedia>
             <EmptyTitle>Nothing assigned yet</EmptyTitle>
             <EmptyDescription>
-              Organizers assign projects once submissions close. Check back soon.
+              Tous les coachs évalueront tous les projets à la fin de la période de réalisation.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -388,21 +393,21 @@ export default function ScoringConsolePage() {
                 <InputGroupInput
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search projects…"
-                  aria-label="Search projects"
+                  placeholder="Rechercher un projet…"
+                  aria-label="Rechercher un projet"
                 />
               </InputGroup>
               <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
                 <TabsList className="w-full">
                   <TabsTrigger value="all">All {items.length}</TabsTrigger>
-                  <TabsTrigger value="todo">To do {items.length - done}</TabsTrigger>
-                  <TabsTrigger value="done">Done {done}</TabsTrigger>
+                <TabsTrigger value="todo">À faire {items.length - done}</TabsTrigger>
+                <TabsTrigger value="done">Terminés {done}</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
               {visible.length === 0 ? (
-                <p className="text-muted-foreground p-6 text-center text-sm">No projects match.</p>
+                  <p className="text-muted-foreground p-6 text-center text-sm">Aucun projet ne correspond.</p>
               ) : (
                 batches.map((b) => (
                   <div key={b} className="flex flex-col gap-0.5">
@@ -430,7 +435,7 @@ export default function ScoringConsolePage() {
                             {i.scored ? (
                               <CheckCircle2
                                 className="text-success size-4 shrink-0"
-                                aria-label="Scored"
+                        aria-label="Évalué"
                               />
                             ) : inProgress ? (
                               <CircleDot
@@ -440,7 +445,7 @@ export default function ScoringConsolePage() {
                             ) : (
                               <Circle
                                 className="text-muted-foreground/60 size-4 shrink-0"
-                                aria-label="To do"
+                        aria-label="À faire"
                               />
                             )}
                             <span className="min-w-0 flex-1">
@@ -451,7 +456,8 @@ export default function ScoringConsolePage() {
                             </span>
                             {i.scored && i.criteria && (
                               <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                                {formatNumber(rawScore(i.criteria, criteria), 2)}
+                                {i.favorite && <Heart className="text-primary mr-1 inline size-3" />}
+                                {formatNumber(rawScore(i.criteria, criteria, Boolean(i.favorite)), 2)}
                               </span>
                             )}
                           </button>
@@ -473,7 +479,12 @@ export default function ScoringConsolePage() {
                       {current.trackName && <Badge variant="secondary">{current.trackName}</Badge>}
                       {current.scored && (
                         <Badge variant="outline">
-                          <CheckCircle2 /> Scored {relativeTime(current.scoredAt)}
+                      <CheckCircle2 /> Évalué {relativeTime(current.scoredAt)}
+                        </Badge>
+                      )}
+                      {current.favorite && (
+                        <Badge>
+                          <Heart /> Coup de cœur
                         </Badge>
                       )}
                     </div>
@@ -527,14 +538,18 @@ export default function ScoringConsolePage() {
                       <p className="text-muted-foreground flex flex-wrap items-center gap-1 text-xs">
                         <Kbd>1</Kbd>–<Kbd>5</Kbd> to mark · <Kbd>↑</Kbd>
                         <Kbd>↓</Kbd> to move · <Kbd>⌘</Kbd>
-                        <Kbd>↵</Kbd> save & next
+                    <Kbd>↵</Kbd> enregistrer et continuer
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-muted-foreground text-xs">Weighted score</p>
+                      <p className="text-muted-foreground text-xs">
+                {draft.favorite ? "Note pondérée avec bonus +1" : "Note pondérée"}
+                      </p>
                       <p className="text-2xl font-semibold tabular-nums">
                         {Object.keys(draft.marks).length ? formatNumber(preview, 2) : "—"}
-                        <span className="text-muted-foreground text-sm font-normal"> / 5</span>
+                        <span className="text-muted-foreground text-sm font-normal">
+                  {draft.favorite ? " / 5 + bonus" : " / 5"}
+                        </span>
                       </p>
                     </div>
                   </div>
@@ -543,7 +558,7 @@ export default function ScoringConsolePage() {
                     <Alert>
                       <AlertTitle>No rubric yet</AlertTitle>
                       <AlertDescription>
-                        The organizers haven't set up scoring criteria for this event.
+                      Les administrateurs n’ont pas encore défini les critères de cet événement.
                       </AlertDescription>
                     </Alert>
                   ) : (
@@ -572,7 +587,7 @@ export default function ScoringConsolePage() {
                               )}
                             </div>
                             <ToggleGroup
-                              aria-label={`${c.label} score`}
+                          aria-label={`Note pour ${c.label}`}
                               value={value ? [String(value)] : []}
                               onValueChange={(v) => {
                                 setActive(idx);
@@ -606,6 +621,24 @@ export default function ScoringConsolePage() {
                     </div>
                   )}
 
+                  <Field orientation="horizontal" data-disabled={locked || undefined}>
+                    <Checkbox
+                      id="judge-favorite"
+                      checked={draft.favorite}
+                      disabled={locked}
+                      onCheckedChange={(checked) => update({ favorite: checked === true })}
+                    />
+                    <FieldContent>
+                      <FieldLabel htmlFor="judge-favorite">
+                        <Heart /> Coup de cœur (+1)
+                      </FieldLabel>
+                      <FieldDescription>
+                        Un seul par événement. Enregistrer ce projet déplace votre bonus depuis le
+                        projet précédemment choisi.
+                      </FieldDescription>
+                    </FieldContent>
+                  </Field>
+
                   <div className="flex flex-col gap-1.5">
                     <label htmlFor="judge-comment" className="text-sm font-medium">
                       Notes <span className="text-muted-foreground font-normal">(optional)</span>
@@ -614,7 +647,7 @@ export default function ScoringConsolePage() {
                       id="judge-comment"
                       value={draft.comment}
                       onChange={(e) => update({ comment: e.target.value })}
-                      placeholder="What stood out? Visible only to you and the organizers."
+                      placeholder="Points marquants ? Visible uniquement par vous et les administrateurs."
                       maxLength={4000}
                       rows={3}
                       disabled={locked}
@@ -624,7 +657,7 @@ export default function ScoringConsolePage() {
                   <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
                       <ShieldCheck className="size-3.5 shrink-0" />
-                      Your scores are private — other judges can't see them (enforced by the API).
+                    Vos notes sont privées : les autres coachs ne peuvent pas les voir.
                     </p>
                     {!locked && (
                       <Button
@@ -633,14 +666,14 @@ export default function ScoringConsolePage() {
                         className="shrink-0"
                       >
                         {save.isPending ? <Spinner /> : null}
-                        {current.scored && !dirty ? "Update & next" : "Save & next"}
+                      {current.scored && !dirty ? "Mettre à jour et continuer" : "Enregistrer et continuer"}
                         <ArrowRight />
                       </Button>
                     )}
                   </div>
                   {!locked && !complete && criteria.length > 0 && (
                     <p className="text-muted-foreground -mt-3 text-right text-xs">
-                      {criteria.filter((c) => draft.marks[c.key] === undefined).length} criteria
+                      {criteria.filter((c) => draft.marks[c.key] === undefined).length} critère(s)
                       left to mark
                     </p>
                   )}

@@ -34,6 +34,7 @@ import { Skeleton } from "@juryza/ui/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@juryza/ui/components/ui/tabs";
 
 import { EventCover, NextMilestone, PhaseBadge } from "@/components/event-bits";
+import { useI18n } from "@/components/locale-provider";
 import { useViewer } from "@/components/viewer";
 import { api } from "@/lib/api";
 import { formatNumber, formatRange } from "@/lib/format";
@@ -41,28 +42,30 @@ import { type Phase, phaseOf } from "@/lib/phase";
 import { hasAtLeast } from "@/lib/roles";
 import type { Event, Json } from "@/lib/types";
 
-/** Explore events: search and filter every published hackathon on this instance. */
+/** Search and filter the published internal Innovation Lab events. */
 
 type EventRow = Json<Event> & { projectCount: number; participantCount: number };
 
-const FILTERS: { value: "all" | "fixtures" | Phase; label: string }[] = [
-  { value: "all", label: "All Events" },
-  { value: "fixtures", label: "📌 Pinned Fixtures" },
-  { value: "submissions", label: "Open for submissions" },
-  { value: "judging", label: "Judging" },
-  { value: "voting", label: "Voting" },
-  { value: "results", label: "Results" },
-  { value: "upcoming", label: "Upcoming" },
-];
-
 export default function EventsPage() {
   const viewer = useViewer();
+  const { t } = useI18n();
   const [q, setQ] = useState("");
   const [phase, setPhase] = useState<"all" | "fixtures" | Phase>("all");
   const { data, isLoading, error } = useQuery({
     queryKey: ["events"],
     queryFn: () => api.get<{ events: EventRow[] }>("/api/events"),
   });
+  const filters: { value: "all" | "fixtures" | Phase; label: string }[] = [
+    { value: "all", label: t("events.all") },
+    { value: "fixtures", label: t("events.demos") },
+    { value: "pitching", label: t("events.pitching") },
+    { value: "pitch-voting", label: t("events.voting") },
+    { value: "team-formation", label: t("events.formation") },
+    { value: "submissions", label: t("events.projects") },
+    { value: "judging", label: t("events.evaluation") },
+    { value: "results", label: t("events.results") },
+    { value: "upcoming", label: t("events.upcoming") },
+  ];
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {
@@ -102,23 +105,22 @@ export default function EventsPage() {
           <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-primary text-sm font-semibold">Explore</span>
+                <span className="text-primary text-sm font-semibold">{t("events.eyebrow")}</span>
                 <span className="text-muted-foreground text-xs">·</span>
                 <span className="text-muted-foreground text-xs font-medium">
-                  {data?.events.length ?? 0} Hackathons
+                  {data?.events.length ?? 0} {t("site.events").toLowerCase()}
                 </span>
               </div>
               <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-                Hackathons on Juryza
+                {t("events.title")}
               </h1>
               <p className="text-muted-foreground max-w-2xl text-base">
-                Discover official evaluation test fixtures and explore real-world Hackathon Raptors
-                competitions with computed leaderboards, submissions, and awards.
+                {t("events.description")}
               </p>
             </div>
-            {hasAtLeast(viewer?.role, "organizer") && (
+            {hasAtLeast(viewer?.role, "judge") && (
               <Button nativeButton={false} render={<Link href="/manage/new" />}>
-                <CalendarPlus /> New event
+                <CalendarPlus /> {t("events.new")}
               </Button>
             )}
           </div>
@@ -131,14 +133,14 @@ export default function EventsPage() {
               <InputGroupInput
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search events, places, themes…"
-                aria-label="Search events"
+                placeholder={t("events.search")}
+                aria-label={t("events.search")}
               />
             </InputGroup>
             <div className="-mx-4 overflow-x-auto overflow-y-hidden px-4 sm:mx-0 sm:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               <Tabs value={phase} onValueChange={(v) => setPhase(v as "all" | "fixtures" | Phase)}>
                 <TabsList className="h-9 w-max flex-nowrap">
-                  {FILTERS.map((f) => (
+                  {filters.map((f) => (
                     <TabsTrigger key={f.value} value={f.value} className="px-2.5">
                       {f.label}
                       {data && (
@@ -158,7 +160,7 @@ export default function EventsPage() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-12 px-4 py-10 sm:px-6">
         {error ? (
           <Alert variant="destructive">
-            <AlertTitle>Couldn't load events</AlertTitle>
+            <AlertTitle>{t("events.loadError")}</AlertTitle>
             <AlertDescription>{error.message}</AlertDescription>
           </Alert>
         ) : isLoading ? (
@@ -179,18 +181,17 @@ export default function EventsPage() {
                       <Pin className="size-3.5 rotate-45" />
                     </span>
                     <h2 className="text-xl font-semibold tracking-tight">
-                      Evaluation Fixtures & Sandboxes
+                      {t("events.demoSection")}
                     </h2>
                     <Badge
                       variant="outline"
                       className="border-amber-500/30 text-amber-600 text-xs dark:text-amber-400"
                     >
-                      Judge Testing
+                      {t("events.demo")}
                     </Badge>
                   </div>
                   <p className="text-muted-foreground text-xs sm:text-sm">
-                    Verified test datasets for evaluators. Includes the DOGFOOD fixture & live
-                    sandbox.
+                    {t("events.demoHint")}
                   </p>
                 </div>
 
@@ -209,14 +210,14 @@ export default function EventsPage() {
                   <div className="flex items-center gap-2">
                     <Flame className="text-primary size-5" />
                     <h2 className="text-xl font-semibold tracking-tight">
-                      Community & Real-World Hackathons
+                      {t("events.list")}
                     </h2>
                     <Badge variant="secondary" className="text-xs">
-                      Hackathon Raptors Showcase
+                      Innovation Lab
                     </Badge>
                   </div>
                   <span className="text-muted-foreground text-xs">
-                    {filteredEvents.filter((e) => !e.isFixture).length} Real Competitions
+                    {filteredEvents.filter((e) => !e.isFixture).length} {t("site.events").toLowerCase()}
                   </span>
                 </div>
               )}
@@ -228,12 +229,12 @@ export default function EventsPage() {
                       <Compass />
                     </EmptyMedia>
                     <EmptyTitle>
-                      {data?.events.length ? "No events match" : "No events yet"}
+                      {data?.events.length ? t("events.noMatch") : t("events.none")}
                     </EmptyTitle>
                     <EmptyDescription>
                       {data?.events.length
-                        ? "Try a different search or phase filter."
-                        : "When an organizer publishes an event, it shows up here."}
+                        ? t("events.tryFilters")
+                        : t("events.waiting")}
                     </EmptyDescription>
                   </EmptyHeader>
                   <EmptyContent>
@@ -245,11 +246,11 @@ export default function EventsPage() {
                           setPhase("all");
                         }}
                       >
-                        Clear filters
+                        {t("events.clear")}
                       </Button>
                     ) : (
                       <Button nativeButton={false} render={<Link href="/manage/new" />}>
-                        <CalendarPlus /> Host a hackathon
+                        <CalendarPlus /> {t("home.createEvent")}
                       </Button>
                     )}
                   </EmptyContent>
@@ -276,6 +277,7 @@ export default function EventsPage() {
 /** Featured Pinned Fixture Card for Evaluators */
 function PinnedEventCard({ e }: { e: EventRow }) {
   const isDogfoodFixture = e.slug === "sample-hack-2026";
+  const { t } = useI18n();
   return (
     <Link
       href={`/e/${e.slug}`}
@@ -286,12 +288,12 @@ function PinnedEventCard({ e }: { e: EventRow }) {
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="bg-amber-500 text-slate-950 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold shadow-sm">
               <Pin className="size-3" />
-              {isDogfoodFixture ? "DOGFOOD 2026 Fixture" : "Live Sandbox"}
+              {isDogfoodFixture ? "DOGFOOD 2026" : t("events.demo")}
             </span>
             <PhaseBadge event={e} className="bg-black/40 text-white backdrop-blur" />
           </div>
           <span className="rounded bg-black/40 px-2 py-0.5 text-[0.7rem] font-medium text-white backdrop-blur">
-            Judge Testing
+            {t("events.demo")}
           </span>
         </EventCover>
         <CardContent className="flex flex-1 flex-col gap-3.5 p-5">
@@ -328,7 +330,7 @@ function PinnedEventCard({ e }: { e: EventRow }) {
               </span>
             </div>
             <span className="text-primary font-medium group-hover:underline">
-              Enter Event &rarr;
+              {t("events.open")} &rarr;
             </span>
           </div>
         </CardContent>
@@ -339,6 +341,7 @@ function PinnedEventCard({ e }: { e: EventRow }) {
 
 /** Standard Event Card */
 function EventCard({ e }: { e: EventRow }) {
+  const { t } = useI18n();
   return (
     <Link
       href={`/e/${e.slug}`}
@@ -349,11 +352,11 @@ function EventCard({ e }: { e: EventRow }) {
           <PhaseBadge event={e} className="bg-white/15 text-white backdrop-blur" />
           {e.isFixture ? (
             <Badge className="bg-amber-500 font-semibold text-white shadow-sm">
-              <Pin className="size-3" /> Fixture
+              <Pin className="size-3" /> {t("events.demo")}
             </Badge>
           ) : (
             <Badge variant="secondary" className="bg-black/30 text-white backdrop-blur">
-              Hackathon Raptors
+              Innovation Lab
             </Badge>
           )}
         </EventCover>

@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import { db, event, eventJudge, project, registration, score, team, vote } from "@/lib/db";
 
@@ -58,7 +58,7 @@ export async function featuredEvents(limit = 3) {
       teams: sql<number>`(select count(*)::int from ${team} where ${team.eventId} = ${event.id})`,
     })
     .from(event)
-    .where(eq(event.visibility, "published"))
+    .where(and(eq(event.visibility, "published"), eq(event.workflow, "innolab")))
     .orderBy(desc(event.submissionsClose))
     .limit(limit);
 }

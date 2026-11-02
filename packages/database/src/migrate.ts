@@ -2,20 +2,25 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Client as NeonClient, Pool as NeonPool } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { Client } from "pg";
-
-import { db, pool } from "./index";
+import { Client as NodeClient, Pool as NodePool } from "pg";
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const migrationsFolder = resolve(packageDir, "drizzle");
-const connectionString = process.env.DATABASE_URL;
+const connectionString = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
 
 if (!connectionString) {
-  throw new Error("DATABASE_URL is missing.");
+  throw new Error("DATABASE_URL_UNPOOLED or DATABASE_URL is missing.");
 }
 
-const client = new Client({ connectionString });
+const isNeon = connectionString.includes(".neon.tech/");
+const Client = isNeon ? NeonClient : NodeClient;
+const Pool = isNeon ? NeonPool : NodePool;
+const client = new Client({ connectionString }) as NodeClient;
+const pool = new Pool({ connectionString, max: 1 }) as NodePool;
+const db = drizzle(pool);
 
 try {
   await client.connect();

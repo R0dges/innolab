@@ -15,6 +15,69 @@
       "when": 1792413074130,
       "tag": "0001_useful_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792486005409,
+      "tag": "0002_public_nekra",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792498226447,
+      "tag": "0003_operational-dashboard-announcements",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792500460795,
+      "tag": "0004_event-audit-resources",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792503009780,
+      "tag": "0005_event-calendar",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793031432836,
+      "tag": "0006_wild_blacklash",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793095315221,
+      "tag": "0007_striped_pyro",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793106227162,
+      "tag": "0008_watery_slapstick",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793269054384,
+      "tag": "0009_wild_unicorn",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793279731995,
+      "tag": "0010_previous_hex",
+      "breakpoints": true
     }
   ]
 }

@@ -11,7 +11,9 @@ import type { RubricCriterion, Score } from "@/lib/db";
  * The maths is documented in full in JUDGING.md. In brief:
  *
  * - A **raw score** for one (judge, project) is the weighted mean of that
- *   judge's per-criterion marks, weights normalized to sum to 1.
+ *   judge's per-criterion marks, weights normalized to sum to 1. A coach's
+ *   single event-level favourite adds one point to the criteria total, which
+ *   is `1 / criterion count` on this mean scale.
  * - **Normalization** corrects for judges who run hot or cold. For each judge we
  *   compute the mean and standard deviation of their raw scores, convert each of
  *   their scores to a z-score, then map the z-scores back onto the 1–5 scale
@@ -26,19 +28,31 @@ export interface WeightedCriterion {
   weight: number;
 }
 
+/** The +1 favourite point expressed on the weighted-mean scale. */
+export function favoriteBonus(rubric: WeightedCriterion[]): number {
+  return rubric.length > 0 ? 1 / rubric.length : 0;
+}
+
 /** Weighted mean of one score's criteria marks. Missing marks are skipped. */
-export function rawScore(criteria: Record<string, number>, rubric: WeightedCriterion[]): number {
+export function rawScore(
+  criteria: Record<string, number>,
+  rubric: WeightedCriterion[],
+  favorite = false
+): number {
   let weightSum = 0;
   let acc = 0;
+  let marked = 0;
   for (const c of rubric) {
     const mark = criteria[c.key];
     if (typeof mark === "number" && !Number.isNaN(mark)) {
       acc += mark * c.weight;
       weightSum += c.weight;
+      marked += 1;
     }
   }
   if (weightSum === 0) return 0;
-  return acc / weightSum;
+  const bonus = favorite && marked === rubric.length ? favoriteBonus(rubric) : 0;
+  return acc / weightSum + bonus;
 }
 
 function mean(xs: number[]): number {
@@ -152,12 +166,12 @@ export function judgeStats(rows: ScoreRow[]) {
 
 /** Convenience: build the raw rows from DB score records + rubric. */
 export function toScoreRows(
-  scores: Pick<Score, "judgeId" | "projectId" | "criteria">[],
+  scores: Pick<Score, "judgeId" | "projectId" | "criteria" | "favorite">[],
   rubric: Pick<RubricCriterion, "key" | "weight">[]
 ): ScoreRow[] {
   return scores.map((s) => ({
     judgeId: s.judgeId,
     projectId: s.projectId,
-    raw: rawScore(s.criteria, rubric),
+    raw: rawScore(s.criteria, rubric, s.favorite),
   }));
 }

@@ -48,6 +48,14 @@ import {
   FieldTitle,
 } from "@juryza/ui/components/ui/field";
 import { Input } from "@juryza/ui/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@juryza/ui/components/ui/select";
 import { Skeleton } from "@juryza/ui/components/ui/skeleton";
 import { Spinner } from "@juryza/ui/components/ui/spinner";
 import { Switch } from "@juryza/ui/components/ui/switch";
@@ -58,9 +66,21 @@ import { Section } from "@/components/page";
 import { api } from "@/lib/api";
 import type { RichDoc } from "@/lib/db/schema";
 import { formatDateTime, relativeTime } from "@/lib/format";
-import { eventKey } from "@/lib/queries";
+import { type AnnouncementItem, eventKey } from "@/lib/queries";
 import { isEmptyDoc, parseRichDoc, textToDoc } from "@/lib/rich-text";
-import type { Announcement, Json } from "@/lib/types";
+
+const PRIORITIES = [
+  { value: "normal", label: "Normal" },
+  { value: "important", label: "Important" },
+  { value: "urgent", label: "Urgent" },
+];
+
+const AUDIENCES = [
+  { value: "all", label: "Everyone" },
+  { value: "participants", label: "Participants" },
+  { value: "coaches", label: "Coaches" },
+  { value: "organizers", label: "Organizers" },
+];
 
 export default function AnnouncementsPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -69,12 +89,14 @@ export default function AnnouncementsPage() {
   const { data, isLoading } = useQuery({
     queryKey: listKey,
     queryFn: () =>
-      api.get<{ announcements: Json<Announcement>[] }>(`/api/events/${slug}/announcements`),
+      api.get<{ announcements: AnnouncementItem[] }>(`/api/events/${slug}/announcements`),
   });
   const [title, setTitle] = useState("");
   const [body, setBody] = useState<RichDoc>(() => textToDoc(""));
   const [editorKey, setEditorKey] = useState(0);
   const [pinned, setPinned] = useState(false);
+  const [priority, setPriority] = useState("normal");
+  const [audience, setAudience] = useState("all");
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: eventKey(slug) });
 
@@ -84,6 +106,8 @@ export default function AnnouncementsPage() {
         title: title.trim(),
         body,
         pinned,
+        priority,
+        audience,
       }),
     onSuccess: async () => {
       toast.success("Announcement posted");
@@ -91,6 +115,8 @@ export default function AnnouncementsPage() {
       setBody(textToDoc(""));
       setEditorKey((k) => k + 1);
       setPinned(false);
+      setPriority("normal");
+      setAudience("all");
       await refresh();
     },
     onError: (e) => toast.error(e.message),
@@ -152,6 +178,50 @@ export default function AnnouncementsPage() {
                   shortcuts.
                 </FieldDescription>
               </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel>Priority</FieldLabel>
+                  <Select
+                    items={PRIORITIES}
+                    value={priority}
+                    onValueChange={(v) => setPriority(String(v))}
+                  >
+                    <SelectTrigger aria-label="Announcement priority">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {PRIORITIES.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel>Audience</FieldLabel>
+                  <Select
+                    items={AUDIENCES}
+                    value={audience}
+                    onValueChange={(v) => setAudience(String(v))}
+                  >
+                    <SelectTrigger aria-label="Announcement audience">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {AUDIENCES.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
               <FieldLabel htmlFor="pinned">
                 <Field orientation="horizontal">
                   <FieldContent>
@@ -196,10 +266,16 @@ export default function AnnouncementsPage() {
                           <Pin /> Pinned
                         </Badge>
                       )}
+                      {a.priority !== "normal" && (
+                        <Badge variant={a.priority === "urgent" ? "destructive" : "outline"}>
+                          {a.priority}
+                        </Badge>
+                      )}
+                      <Badge variant="outline">{a.audience}</Badge>
                       {a.title}
                     </CardTitle>
                     <CardDescription title={formatDateTime(a.createdAt)}>
-                      Posted {relativeTime(a.createdAt)}
+                      Posted by {a.authorName ?? "an organizer"} {relativeTime(a.createdAt)}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="px-4">

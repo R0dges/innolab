@@ -1,0 +1,2 @@
+ALTER TABLE "score" ADD COLUMN "favorite" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "score_one_favorite_per_judge_event_idx" ON "score" USING btree ("event_id","judge_id") WHERE "score"."favorite" = true;

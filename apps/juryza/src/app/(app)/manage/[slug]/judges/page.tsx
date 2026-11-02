@@ -92,6 +92,7 @@ interface Invite {
   inviteUrl: string;
 }
 interface Panel {
+  canManage: boolean;
   judges: PanelJudge[];
   invites: Invite[];
 }
@@ -142,13 +143,25 @@ export default function JudgesPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Judges"
-        description="Your judging panel, the tracks each judge covers, and their progress through assigned reviews."
+        description="Your judging panel, the tracks each judge covers, and their progress through assigned reviews. Innolab judges are appointed by platform admins."
         actions={
-          <Button onClick={() => setInviteOpen(true)}>
-            <MailPlus /> Invite judge
-          </Button>
+          data?.canManage ? (
+            <Button onClick={() => setInviteOpen(true)}>
+              <MailPlus /> Invite judge
+            </Button>
+          ) : null
         }
       />
+
+      {data && !data.canManage && detail?.event.workflow === "innolab" && (
+        <Alert>
+          <AlertTitle>Admin-managed jury</AlertTitle>
+          <AlertDescription>
+            You can follow the panel and its progress, but only a platform admin can appoint,
+            update, or remove Innolab judges.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Judges" value={isLoading ? "…" : judges.length} icon={Gavel} />
@@ -189,9 +202,11 @@ export default function JudgesPage() {
               Invite judges by email. Anyone with an account joins the panel straight away.
             </EmptyDescription>
           </EmptyHeader>
-          <Button onClick={() => setInviteOpen(true)}>
-            <MailPlus /> Invite judge
-          </Button>
+          {data?.canManage && (
+            <Button onClick={() => setInviteOpen(true)}>
+              <MailPlus /> Invite judge
+            </Button>
+          )}
         </Empty>
       ) : (
         <Card className="py-0">
@@ -205,9 +220,11 @@ export default function JudgesPage() {
                   <TableHead className="text-right">Scored</TableHead>
                   <TableHead className="w-40">Progress</TableHead>
                   <TableHead>Last activity</TableHead>
-                  <TableHead className="w-10 pr-4">
-                    <span className="sr-only">Actions</span>
-                  </TableHead>
+                  {data?.canManage && (
+                    <TableHead className="w-10 pr-4">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -253,30 +270,35 @@ export default function JudgesPage() {
                       >
                         {j.lastScoredAt ? relativeTime(j.lastScoredAt) : "—"}
                       </TableCell>
-                      <TableCell className="pr-4">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            render={
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label={`Actions for ${j.name}`}
-                              />
-                            }
-                          >
-                            <MoreHorizontal />
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setEditing(j)}>
-                              <Tags /> Edit tracks
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem variant="destructive" onClick={() => setRemoving(j)}>
-                              <UserMinus /> Remove from panel
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
+                      {data?.canManage && (
+                        <TableCell className="pr-4">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              render={
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label={`Actions for ${j.name}`}
+                                />
+                              }
+                            >
+                              <MoreHorizontal />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => setEditing(j)}>
+                                <Tags /> Edit tracks
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onClick={() => setRemoving(j)}
+                              >
+                                <UserMinus /> Remove from panel
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      )}
                     </TableRow>
                   );
                 })}
@@ -286,7 +308,7 @@ export default function JudgesPage() {
         </Card>
       )}
 
-      {data && data.invites.length > 0 && (
+      {data?.canManage && data.invites.length > 0 && (
         <Section
           title="Pending invitations"
           description="Juryza runs without an email server — share each link with its judge. A link only works for the address it was issued to."
@@ -320,15 +342,17 @@ export default function JudgesPage() {
         </Section>
       )}
 
-      <InviteDialog
-        slug={slug}
-        open={inviteOpen}
-        onOpenChange={setInviteOpen}
-        tracks={tracks}
-        onDone={refresh}
-      />
+      {data?.canManage && (
+        <InviteDialog
+          slug={slug}
+          open={inviteOpen}
+          onOpenChange={setInviteOpen}
+          tracks={tracks}
+          onDone={refresh}
+        />
+      )}
 
-      {editing && (
+      {data?.canManage && editing && (
         <TracksDialog
           key={editing.id}
           slug={slug}
@@ -339,7 +363,10 @@ export default function JudgesPage() {
         />
       )}
 
-      <AlertDialog open={removing !== null} onOpenChange={(o) => !o && setRemoving(null)}>
+      <AlertDialog
+        open={data?.canManage === true && removing !== null}
+        onOpenChange={(o) => !o && setRemoving(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {removing?.name} from the panel?</AlertDialogTitle>

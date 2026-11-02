@@ -71,6 +71,7 @@ export const GET = handle(async (req: NextRequest) => {
         trackName: track.name,
         batch: assignment.batch,
         criteria: score.criteria,
+        favorite: score.favorite,
         comment: score.comment,
         scoredAt: score.updatedAt,
       })

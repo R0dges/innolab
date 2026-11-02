@@ -49,3 +49,4 @@ yarn-error.log*
 # Local docker build diagnostics
 build.log
 build2.log
+.neon

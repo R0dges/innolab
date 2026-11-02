@@ -2,15 +2,15 @@ import { and, eq, or } from "drizzle-orm";
 
 import type { Event } from "@/lib/db";
 import { db, event, eventJudge, registration, team, teamMember } from "@/lib/db";
+import { hasAtLeast } from "@/lib/roles";
 import { forbidden, notFound } from "@/lib/server/http";
 import type { Identity } from "@/lib/server/identity";
 
 /**
  * Event lookup and the per-event permission rules.
  *
- *  - **Manage** an event: its creator, or an admin. (Organizer is the platform
- *    role that may *create* events; it does not grant power over other
- *    organizers' events.)
+ *  - **Manage** an event: its coach creator, or an admin. The coach role may
+ *    create events, but does not grant power over another coach's events.
  *  - **Judge** an event: a member of its judging panel (`event_judge`).
  *  - **See** a draft event: managers only; published events are public.
  */
@@ -27,7 +27,15 @@ export async function findEvent(ref: string): Promise<Event | null> {
 
 export function canManage(me: Identity | null, e: Pick<Event, "createdBy">): boolean {
   if (!me) return false;
-  return me.role === "admin" || (me.role === "organizer" && e.createdBy === me.userId);
+  return me.role === "admin" || (hasAtLeast(me.role, "judge") && e.createdBy === me.userId);
+}
+
+/** Innolab jury membership is appointed by platform admins, not event participants or owners. */
+export function canManageJudgePanel(
+  me: Identity | null,
+  e: Pick<Event, "createdBy" | "workflow">
+): boolean {
+  return canManage(me, e) && (e.workflow !== "innolab" || me?.role === "admin");
 }
 
 /** Load an event the caller may see; drafts 404 for non-managers (no existence leak). */
@@ -40,7 +48,25 @@ export async function loadEvent(ref: string, me: Identity | null): Promise<Event
 export async function loadManagedEvent(ref: string, me: Identity): Promise<Event> {
   const e = await findEvent(ref);
   if (!e) throw notFound("Event not found");
-  if (!canManage(me, e)) throw forbidden("Only this event's organizers can do that");
+  if (!canManage(me, e)) throw forbidden("Only this event's coach creator can do that");
+  return e;
+}
+
+/** Operational Innolab actions may be performed by a manager or an appointed coach. */
+export async function loadCoachedEvent(ref: string, me: Identity): Promise<Event> {
+  const e = await findEvent(ref);
+  if (!e) throw notFound("Event not found");
+  if (!canManage(me, e) && !(await isPanelJudge(e.id, me.userId))) {
+    throw forbidden("Only this event's coaches can do that");
+  }
+  return e;
+}
+
+export async function loadJudgeManagedEvent(ref: string, me: Identity): Promise<Event> {
+  const e = await loadManagedEvent(ref, me);
+  if (e.workflow === "innolab" && me.role !== "admin") {
+    throw forbidden("Only platform admins can appoint judges for an Innolab event");
+  }
   return e;
 }
 
@@ -63,6 +89,28 @@ export async function teamOf(eventId: string, userId: string) {
     .limit(1);
   return row ?? null;
 }
+
+/** The caller's complete relationship to an event, shared by event read models. */
+export async function viewerForEvent(e: Event, me: Identity | null) {
+  if (!me) return null;
+  const [[reg], teamRow, panelJudge] = await Promise.all([
+    db
+      .select({ userId: registration.userId })
+      .from(registration)
+      .where(and(eq(registration.eventId, e.id), eq(registration.userId, me.userId)))
+      .limit(1),
+    teamOf(e.id, me.userId),
+    isPanelJudge(e.id, me.userId),
+  ]);
+  return {
+    registered: Boolean(reg),
+    team: teamRow,
+    isJudge: panelJudge,
+    canManage: canManage(me, e),
+  };
+}
+
+export type EventViewer = Awaited<ReturnType<typeof viewerForEvent>>;
 
 export async function register(eventId: string, userId: string) {
   await db.insert(registration).values({ eventId, userId }).onConflictDoNothing();

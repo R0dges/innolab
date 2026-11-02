@@ -4,7 +4,7 @@ import { z } from "zod";
 import { assignment, db, eventJudge, judgeInvite, score, user as userTable } from "@/lib/db";
 import { id, secretToken } from "@/lib/ids";
 import { audit } from "@/lib/server/audit";
-import { loadManagedEvent } from "@/lib/server/events";
+import { canManageJudgePanel, loadJudgeManagedEvent, loadManagedEvent } from "@/lib/server/events";
 import { created, handle, readBody } from "@/lib/server/http";
 import { requireUser } from "@/lib/server/identity";
 import { dispatch } from "@/lib/server/webhooks";
@@ -22,6 +22,7 @@ type P = { event: string };
 export const GET = handle<P>(async (req, { event: ref }) => {
   const me = await requireUser(req);
   const e = await loadManagedEvent(ref, me);
+  const canManage = canManageJudgePanel(me, e);
   const [panel, invites] = await Promise.all([
     db
       .select({
@@ -48,14 +49,17 @@ export const GET = handle<P>(async (req, { event: ref }) => {
   ]);
   const origin = new URL(req.url).origin;
   return {
+    canManage,
     judges: panel,
-    invites: invites.map((i) => ({
-      id: i.id,
-      email: i.email,
-      trackIds: i.trackIds,
-      createdAt: i.createdAt,
-      inviteUrl: `${origin}/invite/${i.token}`,
-    })),
+    invites: canManage
+      ? invites.map((i) => ({
+          id: i.id,
+          email: i.email,
+          trackIds: i.trackIds,
+          createdAt: i.createdAt,
+          inviteUrl: `${origin}/invite/${i.token}`,
+        }))
+      : [],
   };
 });
 
@@ -66,7 +70,7 @@ const body = z.object({
 
 export const POST = handle<P>(async (req, { event: ref }) => {
   const me = await requireUser(req);
-  const e = await loadManagedEvent(ref, me);
+  const e = await loadJudgeManagedEvent(ref, me);
   const { email, trackIds } = await readBody(req, body);
 
   const [existing] = await db.select().from(userTable).where(eq(userTable.email, email)).limit(1);

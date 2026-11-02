@@ -22,7 +22,15 @@ export async function pitchVoteRights(
   me: Identity | null,
   createdBy: string | null
 ) {
-  if (!me) return { registered: false, panelJudge: false, manager: false, canVote: false };
+  if (!me) {
+    return {
+      registered: false,
+      panelJudge: false,
+      manager: false,
+      canPropose: false,
+      canVote: false,
+    };
+  }
   const [[registered], [panelJudge]] = await Promise.all([
     db
       .select({ userId: registration.userId })
@@ -36,10 +44,12 @@ export async function pitchVoteRights(
       .limit(1),
   ]);
   const manager = canManage(me, { createdBy });
+  const participating = Boolean(registered && me.role === "participant" && !panelJudge && !manager);
   return {
     registered: Boolean(registered),
     panelJudge: Boolean(panelJudge),
     manager,
-    canVote: Boolean(registered || panelJudge || manager),
+    canPropose: participating,
+    canVote: participating,
   };
 }

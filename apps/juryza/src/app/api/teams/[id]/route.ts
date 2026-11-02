@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db, team, teamMember } from "@/lib/db";
 import { submissionsAreOpen } from "@/lib/phase";
 import { audit } from "@/lib/server/audit";
-import { canManage, findEvent } from "@/lib/server/events";
+import { canManage, findEvent, isPanelJudge } from "@/lib/server/events";
 import { forbidden, handle, notFound, readBody } from "@/lib/server/http";
 import { requireUser, resolveIdentity } from "@/lib/server/identity";
 import { findTeam, inviteUrl, teamMembers, teamProject } from "@/lib/server/teams";
@@ -36,7 +36,10 @@ async function context(teamId: string, userId: string | null) {
 export const GET = handle<P>(async (req, { id: teamId }) => {
   const me = await resolveIdentity(req);
   const { t, e, role } = await context(teamId, me?.userId ?? null);
-  const privileged = role !== null || canManage(me, e);
+  const coach = me ? await isPanelJudge(e.id, me.userId) : false;
+  const manager = canManage(me, e);
+  const canReviewRequests = role === "owner" || coach || manager;
+  const privileged = role !== null || coach || manager;
   const [members, proj] = await Promise.all([teamMembers(t.id), teamProject(t.id)]);
   return {
     team: {
@@ -45,7 +48,10 @@ export const GET = handle<P>(async (req, { id: teamId }) => {
       description: t.description,
       lookingForMembers: t.lookingForMembers,
       createdAt: t.createdAt,
-      inviteUrl: privileged ? inviteUrl(new URL(req.url).origin, t.inviteToken) : undefined,
+      inviteUrl:
+        e.workflow !== "innolab" && privileged
+          ? inviteUrl(new URL(req.url).origin, t.inviteToken)
+          : undefined,
     },
     event: {
       id: e.id,
@@ -53,10 +59,11 @@ export const GET = handle<P>(async (req, { id: teamId }) => {
       name: e.name,
       maxTeamSize: e.maxTeamSize,
       submissionsClose: e.submissionsClose,
+      workflow: e.workflow,
     },
     members,
     project: proj && (proj.status === "submitted" || privileged) ? proj : null,
-    viewer: { role, canManage: canManage(me, e), open: submissionsAreOpen(e) },
+    viewer: { role, canManage: manager, canReviewRequests, open: submissionsAreOpen(e) },
   };
 });
 
@@ -69,8 +76,9 @@ const body = z.object({
 export const PATCH = handle<P>(async (req, { id: teamId }) => {
   const me = await requireUser(req);
   const { t, e, role } = await context(teamId, me.userId);
-  if (role !== "owner" && !canManage(me, e))
-    throw forbidden("Only the team owner can edit the team");
+  const coach = await isPanelJudge(e.id, me.userId);
+  if (role !== "owner" && !coach && !canManage(me, e))
+    throw forbidden("Only the project owner or an event coach can edit the project team");
   const b = await readBody(req, body);
   await db
     .update(team)
@@ -89,6 +97,9 @@ export const DELETE = handle<P>(async (req, { id: teamId }) => {
   const { t, e, role } = await context(teamId, me.userId);
   const manager = canManage(me, e);
   if (role !== "owner" && !manager) throw forbidden("Only the team owner can disband the team");
+  if (e.workflow === "innolab" && !manager) {
+    throw forbidden("Seul un coach peut supprimer un groupe projet Innovation Lab");
+  }
   if (!manager) {
     if (!submissionsAreOpen(e)) throw forbidden("Teams are locked after the deadline");
     if (await teamProject(t.id)) throw forbidden("Delete the team's project before disbanding");

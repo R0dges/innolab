@@ -4,14 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import {
-  KeyRound,
   LayoutDashboard,
   LogOut,
   Monitor,
   Moon,
   Settings,
   Sun,
-  UserRound,
 } from "lucide-react";
 
 import {
@@ -32,6 +30,7 @@ import { useTheme } from "@juryza/ui/theme/theme";
 
 import { UserAvatar } from "@/components/user-avatar";
 import type { Viewer } from "@/components/viewer";
+import { useI18n } from "@/components/locale-provider";
 import { signOut } from "@/lib/auth-client";
 
 /** Account menu: profile, settings, theme, sign out. */
@@ -48,6 +47,7 @@ export function UserMenu({
 }) {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
+  const { t } = useI18n();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -56,7 +56,7 @@ export function UserMenu({
             <button
               type="button"
               className="rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-              aria-label="Account menu"
+              aria-label={t("account.menu")}
             />
           )
         }
@@ -78,25 +78,17 @@ export function UserMenu({
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem render={<Link href="/dashboard" />}>
-            <LayoutDashboard /> Dashboard
+            <LayoutDashboard /> {t("nav.dashboard")}
           </DropdownMenuItem>
-          {viewer.username && (
-            <DropdownMenuItem render={<Link href={`/u/${viewer.username}`} />}>
-              <UserRound /> Public profile
-            </DropdownMenuItem>
-          )}
           <DropdownMenuItem render={<Link href="/settings/profile" />}>
-            <Settings /> Settings
-          </DropdownMenuItem>
-          <DropdownMenuItem render={<Link href="/settings/tokens" />}>
-            <KeyRound /> API tokens
+            <Settings /> {t("nav.settings")}
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <Sun className="dark:hidden" />
-            <Moon className="hidden dark:block" /> Theme
+            <Moon className="hidden dark:block" /> {t("account.theme")}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
             <DropdownMenuRadioGroup
@@ -104,13 +96,13 @@ export function UserMenu({
               onValueChange={(v) => setTheme(String(v))}
             >
               <DropdownMenuRadioItem value="light">
-                <Sun /> Light
+                <Sun /> {t("account.light")}
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="dark">
-                <Moon /> Dark
+                <Moon /> {t("account.dark")}
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="system">
-                <Monitor /> System
+                <Monitor /> {t("account.system")}
               </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
@@ -124,7 +116,7 @@ export function UserMenu({
             router.refresh();
           }}
         >
-          <LogOut /> Sign out
+          <LogOut /> {t("account.signOut")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

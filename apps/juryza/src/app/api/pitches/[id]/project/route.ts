@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, project, registration, team, teamMember } from "@/lib/db";
@@ -6,7 +6,6 @@ import { id, secretToken } from "@/lib/ids";
 import { innolabProjectFormationIsOpen } from "@/lib/innolab";
 import { textToDoc } from "@/lib/rich-text";
 import { audit } from "@/lib/server/audit";
-import { teamOf } from "@/lib/server/events";
 import { conflict, created, forbidden, handle, readBody } from "@/lib/server/http";
 import { requireUser } from "@/lib/server/identity";
 import { loadPitch } from "@/lib/server/pitches";
@@ -27,15 +26,22 @@ export const POST = handle<{ id: string }>(async (req, { id: pitchId }) => {
   if (!innolabProjectFormationIsOpen(event)) {
     throw forbidden("Team and project creation is not open for this event");
   }
-  if (await teamOf(event.id, me.userId)) {
-    throw conflict("You already belong to a team for this event");
-  }
   const body = await readBody(req, input);
   const teamId = id.team();
   const projectId = id.project();
 
   await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`team-membership:${event.id}:${me.userId}`}))`
+    );
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${current.id}))`);
+    const [membership] = await tx
+      .select({ teamId: teamMember.teamId })
+      .from(teamMember)
+      .innerJoin(team, eq(team.id, teamMember.teamId))
+      .where(and(eq(team.eventId, event.id), eq(teamMember.userId, me.userId)))
+      .limit(1);
+    if (membership) throw conflict("You already belong to a team for this event");
     const [existing] = await tx
       .select({ id: project.id })
       .from(project)

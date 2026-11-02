@@ -22,10 +22,11 @@ import { dispatch } from "@/lib/server/webhooks";
  *      decided here, before a row is read — there is no code path that returns
  *      judge A's rows to judge B. Callers who sit on no judging panel (e.g. a
  *      participant) get 403 as well.
- * POST /api/judge/scores { projectId, criteria, comment }
+ * POST /api/judge/scores { projectId, criteria, favorite, comment }
  *      Save (or update) the caller's score. Only for a project assigned to the
  *      caller, only with marks for the event's rubric, and only while judging
- *      is open (before `judgingClose` and before results are published).
+ *      is open (before `judgingClose` and before results are published). At
+ *      most one score per caller and event may carry the favourite bonus.
  */
 
 async function assertJudge(me: Identity) {
@@ -67,6 +68,7 @@ export const GET = handle(async (req: NextRequest) => {
       projectId: score.projectId,
       projectTitle: project.title,
       criteria: score.criteria,
+      favorite: score.favorite,
       comment: score.comment,
       updatedAt: score.updatedAt,
     })
@@ -95,7 +97,8 @@ export const GET = handle(async (req: NextRequest) => {
       ...r,
       weighted: rawScore(
         r.criteria,
-        rubrics.filter((c) => c.eventId === r.eventId)
+        rubrics.filter((c) => c.eventId === r.eventId),
+        r.favorite
       ),
     })),
   };
@@ -104,6 +107,7 @@ export const GET = handle(async (req: NextRequest) => {
 const body = z.object({
   projectId: z.string().min(1),
   criteria: z.record(z.string(), z.number().int().min(1).max(5)),
+  favorite: z.boolean().default(false),
   comment: z.string().trim().max(4000).nullish(),
 });
 
@@ -115,6 +119,10 @@ export const POST = handle(async (req: NextRequest) => {
     .select({ event })
     .from(assignment)
     .innerJoin(event, eq(event.id, assignment.eventId))
+    .innerJoin(
+      eventJudge,
+      and(eq(eventJudge.eventId, assignment.eventId), eq(eventJudge.userId, assignment.judgeId))
+    )
     .where(and(eq(assignment.judgeId, me.userId), eq(assignment.projectId, b.projectId)))
     .limit(1);
   if (!assigned) throw forbidden("That project is not assigned to you");
@@ -134,29 +142,55 @@ export const POST = handle(async (req: NextRequest) => {
   if (unknown.length) throw badRequest(`Unknown criteria: ${unknown.join(", ")}`);
   if (missing.length) throw badRequest(`Score every criterion (missing: ${missing.join(", ")})`);
 
-  await db
-    .insert(score)
-    .values({
-      id: id.score(),
-      eventId: e.id,
-      judgeId: me.userId,
-      projectId: b.projectId,
-      criteria: b.criteria,
-      comment: b.comment ?? null,
-    })
-    .onConflictDoUpdate({
-      target: [score.judgeId, score.projectId],
-      set: { criteria: b.criteria, comment: b.comment ?? null, updatedAt: new Date() },
-    });
+  const updatedAt = new Date();
+  await db.transaction(async (tx) => {
+    if (b.favorite) {
+      await tx
+        .update(score)
+        .set({ favorite: false, updatedAt })
+        .where(
+          and(
+            eq(score.eventId, e.id),
+            eq(score.judgeId, me.userId),
+            eq(score.favorite, true)
+          )
+        );
+    }
+
+    await tx
+      .insert(score)
+      .values({
+        id: id.score(),
+        eventId: e.id,
+        judgeId: me.userId,
+        projectId: b.projectId,
+        criteria: b.criteria,
+        favorite: b.favorite,
+        comment: b.comment ?? null,
+      })
+      .onConflictDoUpdate({
+        target: [score.judgeId, score.projectId],
+        set: {
+          criteria: b.criteria,
+          favorite: b.favorite,
+          comment: b.comment ?? null,
+          updatedAt,
+        },
+      });
+  });
 
   await audit({
     eventId: e.id,
     actor: me,
     action: "score.saved",
     target: b.projectId,
-    detail: { criteria: b.criteria },
+    detail: { criteria: b.criteria, favorite: b.favorite },
     req,
   });
-  dispatch("score.saved", { projectId: b.projectId, judgeId: me.userId }, e.id);
+  dispatch(
+    "score.saved",
+    { projectId: b.projectId, judgeId: me.userId, favorite: b.favorite },
+    e.id
+  );
   return { ok: true };
 });

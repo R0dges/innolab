@@ -51,6 +51,26 @@ describe("rawScore", () => {
     expect(rawScore({ other: 5 }, rubric)).toBe(0);
   });
 
+  test("a favourite adds one point to the complete criteria total", () => {
+    const six = ["a", "b", "c", "d", "e", "f"].map((key) => ({ key, weight: 1 }));
+    const marks = Object.fromEntries(six.map(({ key }) => [key, 4]));
+    expect(rawScore(marks, six, true)).toBeCloseTo(4 + 1 / 6, 10);
+    expect(rawScore(marks, six, false)).toBe(4);
+  });
+
+  test("a favourite is not applied to an incomplete evaluation", () => {
+    expect(
+      rawScore(
+        { a: 4 },
+        [
+          { key: "a", weight: 1 },
+          { key: "b", weight: 1 },
+        ],
+        true
+      )
+    ).toBe(4);
+  });
+
   test("toScoreRows applies the rubric to DB-shaped records", () => {
     const out = toScoreRows(
       [
@@ -58,12 +78,13 @@ describe("rawScore", () => {
           judgeId: "j",
           projectId: "p",
           criteria: { impact: 5, execution: 3, innovation: 4, presentation: 4 },
+          favorite: true,
         },
       ],
       rubric
     );
     expect(out).toHaveLength(1);
-    expect(out[0]?.raw).toBeCloseTo(3.95, 10);
+    expect(out[0]?.raw).toBeCloseTo(3.95 + 0.25, 10);
   });
 });
 

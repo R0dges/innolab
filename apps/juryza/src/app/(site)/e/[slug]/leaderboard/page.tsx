@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Eye,
   GitCompareArrows,
+  Heart,
   Lock,
   Medal,
   Minus,
@@ -401,8 +402,9 @@ function OverallTable({ rows, href }: { rows: Row[]; href: (id: string) => strin
             <TableHead>Project</TableHead>
             <TableHead className="hidden lg:table-cell">Track</TableHead>
             <TableHead className="text-right">Reviews</TableHead>
+            <TableHead className="text-right">Coup de cœur</TableHead>
             <TableHead className="text-right">Normalized</TableHead>
-            <TableHead className="text-right">Raw</TableHead>
+            <TableHead className="text-right">Raw + bonus</TableHead>
             <TableHead
               className="pr-4 text-right"
               title="Rank change from raw average to normalized score"
@@ -432,6 +434,11 @@ function OverallTable({ rows, href }: { rows: Row[]; href: (id: string) => strin
                 {p.trackName ?? "—"}
               </TableCell>
               <TableCell className="text-right tabular-nums">{p.reviews}</TableCell>
+              <TableCell className="text-right tabular-nums">
+                <span className="inline-flex items-center gap-1">
+                  <Heart className="text-primary size-3.5" /> {p.favorites}
+                </span>
+              </TableCell>
               <TableCell className="text-right">
                 <ScoreBar value={p.normalized} />
               </TableCell>
@@ -603,7 +610,8 @@ function Methodology({ criteria }: { criteria: Published["criteria"] }) {
         <p>
           Each judge marks projects on the rubric below (1–5 per criterion). A project's{" "}
           <strong className="text-foreground">raw score</strong> is the weighted mean of those
-          marks, averaged over its judges.
+          marks, averaged over its judges. Each judge may also give one project their coup de cœur;
+          it adds one point to that judge's rubric total before normalization.
         </p>
         <p>
           Judges differ: some mark hot, some cold. So every judge's scores are turned into{" "}

@@ -66,24 +66,29 @@ import { cn } from "@juryza/ui/lib/utils";
 import { RichEditor } from "@/components/editor/rich-editor";
 import { EventCover } from "@/components/event-bits";
 import { api } from "@/lib/api";
+import {
+  DEFAULT_EVENT_LOCATION,
+  DEFAULT_EVENT_WORKFLOW,
+  eventLocationOptions,
+  type EventMode,
+  type EventWorkflow,
+} from "@/lib/event-options";
 import { eventKey, useEvent } from "@/lib/queries";
 import type { Event, Json, RichDoc } from "@/lib/types";
 
-type Mode = "online" | "in-person" | "hybrid";
 type Access = "authenticated" | "email" | "open";
 type VotingMode = "quadratic" | "writeup";
-type Workflow = "standard" | "innolab";
 
 interface Form {
   name: string;
   slug: string;
   tagline: string;
-  mode: Mode;
+  mode: EventMode;
   location: string;
   hue: number;
   content: RichDoc | null;
   rules: RichDoc | null;
-  workflow: Workflow;
+  workflow: EventWorkflow;
   pitchSubmissionsOpen: string;
   pitchSubmissionsClose: string;
   pitchVotingOpen: string;
@@ -127,6 +132,8 @@ const PROJECT_DATE_KEYS = [
   "votingElectorateLockAt",
 ] as const;
 
+const INNOLAB_PROJECT_DATE_KEYS = ["submissionsOpen", "submissionsClose", "judgingClose"] as const;
+
 const PITCH_KEYS = [
   "workflow",
   "pitchSubmissionsOpen",
@@ -147,12 +154,12 @@ function toForm(e: Json<Event>): Form {
     name: e.name,
     slug: e.slug,
     tagline: e.tagline ?? "",
-    mode: e.mode as Mode,
+    mode: e.mode as EventMode,
     location: e.location ?? "",
     hue: e.hue,
     content: (e.content as RichDoc | null) ?? null,
     rules: (e.rules as RichDoc | null) ?? null,
-    workflow: (e.workflow as Workflow) ?? "standard",
+    workflow: (e.workflow as EventWorkflow) ?? DEFAULT_EVENT_WORKFLOW,
     pitchSubmissionsOpen: toLocalInput(e.pitchSubmissionsOpen),
     pitchSubmissionsClose: toLocalInput(e.pitchSubmissionsClose),
     pitchVotingOpen: toLocalInput(e.pitchVotingOpen),
@@ -215,6 +222,7 @@ function SettingsForm({ event }: { event: Json<Event> }) {
   const [form, setForm] = useState<Form>(() => toForm(event));
   const [pending, setPending] = useState<string | null>(null);
   const slug = saved.slug;
+  const locationOptions = eventLocationOptions(form.location);
 
   const set = <K extends Key>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
   const dirty = (keys: readonly Key[]) => keys.some((k) => !same(wire(k, form), wire(k, saved)));
@@ -317,7 +325,15 @@ function SettingsForm({ event }: { event: Json<Event> }) {
               <FieldLabel>Format</FieldLabel>
               <Select
                 value={form.mode}
-                onValueChange={(v) => v && set("mode", v as Mode)}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  const mode = value as EventMode;
+                  setForm((current) => ({
+                    ...current,
+                    mode,
+                    location: mode === "online" ? "" : current.location || DEFAULT_EVENT_LOCATION,
+                  }));
+                }}
                 items={{ online: "Online", "in-person": "In person", hybrid: "Hybrid" }}
               >
                 <SelectTrigger className="w-full">
@@ -330,18 +346,27 @@ function SettingsForm({ event }: { event: Json<Event> }) {
                 </SelectContent>
               </Select>
             </Field>
-            <Field>
+            <Field data-disabled={form.mode === "online"}>
               <FieldLabel htmlFor="location">Location</FieldLabel>
-              <Input
-                id="location"
+              <Select
+                items={locationOptions}
                 value={form.location}
-                maxLength={120}
                 disabled={form.mode === "online"}
-                placeholder={
-                  form.mode === "online" ? "Not needed for online events" : "Venue, city"
-                }
-                onChange={(e) => set("location", e.target.value)}
-              />
+                onValueChange={(value) => value && set("location", value)}
+              >
+                <SelectTrigger id="location" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {locationOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </Field>
           </div>
           <Field>
@@ -392,7 +417,10 @@ function SettingsForm({ event }: { event: Json<Event> }) {
       </SectionCard>
 
       <SectionCard
-        {...section("Schedule", PROJECT_DATE_KEYS)}
+        {...section(
+          "Schedule",
+          form.workflow === "innolab" ? INNOLAB_PROJECT_DATE_KEYS : PROJECT_DATE_KEYS
+        )}
         description={`Times are in your timezone (${Intl.DateTimeFormat().resolvedOptions().timeZone}).`}
         error={scheduleError}
       >
@@ -417,19 +445,23 @@ function SettingsForm({ event }: { event: Json<Event> }) {
               value={form.judgingClose}
               onChange={(v) => set("judgingClose", v)}
             />
-            <div className="hidden sm:block" />
-            <DateInput
-              id="votingOpen"
-              label="Community voting opens"
-              value={form.votingOpen}
-              onChange={(v) => set("votingOpen", v)}
-            />
-            <DateInput
-              id="votingClose"
-              label="Community voting closes"
-              value={form.votingClose}
-              onChange={(v) => set("votingClose", v)}
-            />
+            {form.workflow !== "innolab" && (
+              <>
+                <div className="hidden sm:block" />
+                <DateInput
+                  id="votingOpen"
+                  label="Community voting opens"
+                  value={form.votingOpen}
+                  onChange={(v) => set("votingOpen", v)}
+                />
+                <DateInput
+                  id="votingClose"
+                  label="Community voting closes"
+                  value={form.votingClose}
+                  onChange={(v) => set("votingClose", v)}
+                />
+              </>
+            )}
           </div>
         </FieldGroup>
       </SectionCard>
@@ -444,7 +476,7 @@ function SettingsForm({ event }: { event: Json<Event> }) {
             <FieldLabel>Event journey</FieldLabel>
             <Select
               value={form.workflow}
-              onValueChange={(value) => value && set("workflow", value as Workflow)}
+              onValueChange={(value) => value && set("workflow", value as EventWorkflow)}
               items={{ standard: "Standard Juryza", innolab: "Innolab" }}
             >
               <SelectTrigger className="w-full">
@@ -458,8 +490,8 @@ function SettingsForm({ event }: { event: Json<Event> }) {
               </SelectContent>
             </Select>
             <FieldDescription>
-              Innolab collects and selects ideas before team formation. Existing project voting
-              remains separate.
+              Innolab collects and selects ideas before team formation. Final projects are evaluated
+              only by judges appointed by platform admins.
             </FieldDescription>
           </Field>
           {form.workflow === "innolab" && (
@@ -528,122 +560,124 @@ function SettingsForm({ event }: { event: Json<Event> }) {
         </div>
       </SectionCard>
 
-      <SectionCard
-        {...section("Community voting", [
-          "votingAccess",
-          "votingEmailDomains",
-          "voteBudget",
-          "votingMode",
-          "votingShortlistSize",
-          "votingElectorateLockAt",
-        ])}
-        description="Who may vote, how many quadratic-vote credits each voter gets, and the anti-abuse levers."
-      >
-        <FieldGroup>
-          <RadioGroup
-            value={form.votingAccess}
-            onValueChange={(v) => set("votingAccess", v as Access)}
-            className="grid gap-2 md:grid-cols-3"
-          >
-            {(
-              [
-                ["authenticated", "Signed-in users", "One ballot per account."],
-                ["email", "Verified email", "Voters confirm an email address."],
-                ["open", "Open link", "Anyone with the link."],
-              ] as const
-            ).map(([value, label, hint]) => (
-              <FieldLabel key={value} htmlFor={`access-${value}`}>
-                <Field orientation="horizontal">
-                  <RadioGroupItem value={value} id={`access-${value}`} />
-                  <FieldContent>
-                    <FieldTitle>{label}</FieldTitle>
-                    <FieldDescription>{hint}</FieldDescription>
-                  </FieldContent>
-                </Field>
-              </FieldLabel>
-            ))}
-          </RadioGroup>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor="domains">Allowed email domains</FieldLabel>
-              <Input
-                id="domains"
-                value={form.votingEmailDomains}
-                disabled={form.votingAccess !== "email"}
-                placeholder="university.edu, company.com"
-                onChange={(e) => set("votingEmailDomains", e.target.value)}
-              />
-              <FieldDescription>
-                Only used with “Verified email”. Leave empty to accept any domain.
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="voteBudget">Vote credits</FieldLabel>
-              <Input
-                id="voteBudget"
-                type="number"
-                min={1}
-                max={400}
-                value={form.voteBudget}
-                onChange={(e) => set("voteBudget", e.target.valueAsNumber)}
-              />
-              <FieldDescription>
-                n votes on one project cost n² credits — {form.voteBudget || 0} credits allow up to{" "}
-                {Math.floor(Math.sqrt(Math.max(0, form.voteBudget || 0)))} votes on a single
-                project.
-              </FieldDescription>
-            </Field>
-          </div>
+      {form.workflow !== "innolab" && (
+        <SectionCard
+          {...section("Community voting", [
+            "votingAccess",
+            "votingEmailDomains",
+            "voteBudget",
+            "votingMode",
+            "votingShortlistSize",
+            "votingElectorateLockAt",
+          ])}
+          description="Who may vote, how many quadratic-vote credits each voter gets, and the anti-abuse levers."
+        >
+          <FieldGroup>
+            <RadioGroup
+              value={form.votingAccess}
+              onValueChange={(v) => set("votingAccess", v as Access)}
+              className="grid gap-2 md:grid-cols-3"
+            >
+              {(
+                [
+                  ["authenticated", "Signed-in users", "One ballot per account."],
+                  ["email", "Verified email", "Voters confirm an email address."],
+                  ["open", "Open link", "Anyone with the link."],
+                ] as const
+              ).map(([value, label, hint]) => (
+                <FieldLabel key={value} htmlFor={`access-${value}`}>
+                  <Field orientation="horizontal">
+                    <RadioGroupItem value={value} id={`access-${value}`} />
+                    <FieldContent>
+                      <FieldTitle>{label}</FieldTitle>
+                      <FieldDescription>{hint}</FieldDescription>
+                    </FieldContent>
+                  </Field>
+                </FieldLabel>
+              ))}
+            </RadioGroup>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="domains">Allowed email domains</FieldLabel>
+                <Input
+                  id="domains"
+                  value={form.votingEmailDomains}
+                  disabled={form.votingAccess !== "email"}
+                  placeholder="university.edu, company.com"
+                  onChange={(e) => set("votingEmailDomains", e.target.value)}
+                />
+                <FieldDescription>
+                  Only used with “Verified email”. Leave empty to accept any domain.
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="voteBudget">Vote credits</FieldLabel>
+                <Input
+                  id="voteBudget"
+                  type="number"
+                  min={1}
+                  max={400}
+                  value={form.voteBudget}
+                  onChange={(e) => set("voteBudget", e.target.valueAsNumber)}
+                />
+                <FieldDescription>
+                  n votes on one project cost n² credits — {form.voteBudget || 0} credits allow up
+                  to {Math.floor(Math.sqrt(Math.max(0, form.voteBudget || 0)))} votes on a single
+                  project.
+                </FieldDescription>
+              </Field>
+            </div>
 
-          <div className="grid gap-5 sm:grid-cols-3">
-            <Field>
-              <FieldLabel htmlFor="votingMode">Voting mode</FieldLabel>
-              <Select
-                value={form.votingMode}
-                onValueChange={(v) => set("votingMode", v as VotingMode)}
-              >
-                <SelectTrigger id="votingMode">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="quadratic">Counted vote (quadratic)</SelectItem>
-                  <SelectItem value="writeup">Write-up quest (judges decide)</SelectItem>
-                </SelectContent>
-              </Select>
-              <FieldDescription>
-                Write-up mode collects public input with no live tally; the panel makes the final
-                pick.
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="votingShortlistSize">Shortlist size</FieldLabel>
-              <Input
-                id="votingShortlistSize"
-                type="number"
-                min={0}
-                max={100}
-                value={form.votingShortlistSize}
-                onChange={(e) => set("votingShortlistSize", e.target.valueAsNumber)}
-              />
-              <FieldDescription>
-                0 = every submitted project is votable. Otherwise only the top-N by judged rank.
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="votingElectorateLockAt">Electorate lock</FieldLabel>
-              <Input
-                id="votingElectorateLockAt"
-                type="datetime-local"
-                value={form.votingElectorateLockAt}
-                onChange={(e) => set("votingElectorateLockAt", e.target.value)}
-              />
-              <FieldDescription>
-                Only accounts created on or before this time may vote. Leave empty to allow all.
-              </FieldDescription>
-            </Field>
-          </div>
-        </FieldGroup>
-      </SectionCard>
+            <div className="grid gap-5 sm:grid-cols-3">
+              <Field>
+                <FieldLabel htmlFor="votingMode">Voting mode</FieldLabel>
+                <Select
+                  value={form.votingMode}
+                  onValueChange={(v) => set("votingMode", v as VotingMode)}
+                >
+                  <SelectTrigger id="votingMode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="quadratic">Counted vote (quadratic)</SelectItem>
+                    <SelectItem value="writeup">Write-up quest (judges decide)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldDescription>
+                  Write-up mode collects public input with no live tally; the panel makes the final
+                  pick.
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="votingShortlistSize">Shortlist size</FieldLabel>
+                <Input
+                  id="votingShortlistSize"
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={form.votingShortlistSize}
+                  onChange={(e) => set("votingShortlistSize", e.target.valueAsNumber)}
+                />
+                <FieldDescription>
+                  0 = every submitted project is votable. Otherwise only the top-N by judged rank.
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="votingElectorateLockAt">Electorate lock</FieldLabel>
+                <Input
+                  id="votingElectorateLockAt"
+                  type="datetime-local"
+                  value={form.votingElectorateLockAt}
+                  onChange={(e) => set("votingElectorateLockAt", e.target.value)}
+                />
+                <FieldDescription>
+                  Only accounts created on or before this time may vote. Leave empty to allow all.
+                </FieldDescription>
+              </Field>
+            </div>
+          </FieldGroup>
+        </SectionCard>
+      )}
 
       <Card>
         <CardHeader>
@@ -706,7 +740,7 @@ function scheduleProblem(f: Form): string | null {
   if (open !== null && open >= close) return "Submissions must open before the deadline.";
   if (judging !== null && judging <= close)
     return "Judging must close after the submission deadline.";
-  if (vOpen !== null && vClose !== null && vOpen >= vClose)
+  if (f.workflow !== "innolab" && vOpen !== null && vClose !== null && vOpen >= vClose)
     return "Voting must open before it closes.";
   return null;
 }

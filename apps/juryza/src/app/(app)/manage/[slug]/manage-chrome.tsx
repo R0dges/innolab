@@ -10,6 +10,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@juryza/ui/com
 import { Skeleton } from "@juryza/ui/components/ui/skeleton";
 
 import { EventCover, NextMilestone, PhaseBadge } from "@/components/event-bits";
+import { useI18n } from "@/components/locale-provider";
 import { useEvent } from "@/lib/queries";
 
 /**
@@ -18,15 +19,14 @@ import { useEvent } from "@/lib/queries";
  */
 export function ManageChrome({ slug, children }: { slug: string; children: React.ReactNode }) {
   const { data, isLoading, error } = useEvent(slug);
+  const { t } = useI18n();
 
   if (error || (data && !data.viewer?.canManage)) {
     return (
       <Empty className="border">
         <EmptyHeader>
-          <EmptyTitle>You can't manage this event</EmptyTitle>
-          <EmptyDescription>
-            Only the event's organizers (and platform admins) can open its console.
-          </EmptyDescription>
+          <EmptyTitle>{t("event.manageDenied")}</EmptyTitle>
+          <EmptyDescription>{t("event.manageDeniedHint")}</EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
@@ -44,7 +44,7 @@ export function ManageChrome({ slug, children }: { slug: string; children: React
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="truncate text-xl font-semibold tracking-tight">{data.event.name}</h1>
                 {data.event.visibility === "draft" && (
-                  <Badge variant="outline">Draft — only you can see it</Badge>
+                  <Badge variant="outline">{t("event.draft")}</Badge>
                 )}
                 <PhaseBadge event={data.event} />
               </div>
@@ -58,7 +58,7 @@ export function ManageChrome({ slug, children }: { slug: string; children: React
           nativeButton={false}
           render={<Link href={`/e/${slug}`} target="_blank" />}
         >
-          <ExternalLink /> Public page
+          <ExternalLink /> {t("event.openPage")}
         </Button>
       </div>
       {children}

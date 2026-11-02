@@ -127,6 +127,7 @@ export const bundleSchema = z.object({
         judge: z.string(),
         project: z.string(),
         criteria: z.record(z.string(), z.number()),
+        favorite: z.boolean().default(false),
         comment: z.string().nullish(),
       })
     )
@@ -246,12 +247,13 @@ export async function importBundle(input: Bundle, opts: ImportOptions): Promise<
     description: b.event.description ?? null,
     content: b.event.description ? textToDoc(b.event.description) : null,
     visibility: opts.visibility ?? "draft",
+    workflow: "standard",
     submissionsOpen: d(b.event.submissions_open),
     submissionsClose: new Date(b.event.submissions_close),
     judgingClose: d(b.event.judging_close),
     votingOpen: d(b.event.voting_open),
     votingClose: d(b.event.voting_close),
-    maxTeamSize: b.event.max_team_size ?? 4,
+    maxTeamSize: b.event.max_team_size ?? 6,
     reviewsPerProject: b.event.reviews_per_project ?? 3,
     votingAccess: b.event.voting_access ?? "authenticated",
     voteBudget: b.event.vote_budget ?? 16,
@@ -389,6 +391,7 @@ export async function importBundle(input: Bundle, opts: ImportOptions): Promise<
         judgeId,
         projectId,
         criteria: s.criteria,
+        favorite: s.favorite,
         comment: s.comment || null,
       })
       .onConflictDoNothing();
@@ -530,6 +533,7 @@ export async function exportBundle(e: Event): Promise<Bundle> {
       judge: s.judgeId,
       project: s.projectId,
       criteria: s.criteria,
+      favorite: s.favorite,
       comment: s.comment,
     })),
     pairwise: comparisons.map((c) => ({ judge: c.judgeId, winner: c.winnerId, loser: c.loserId })),

@@ -1,7 +1,6 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 
 import {
-  announcement,
   db,
   event,
   eventJudge,
@@ -14,8 +13,10 @@ import {
   user as userTable,
 } from "@/lib/db";
 import { docToText } from "@/lib/rich-text";
+import { INTERNAL_INNOLAB_ONLY } from "@/lib/platform";
+import { announcementsForEvent } from "@/lib/server/announcements";
 import { audit } from "@/lib/server/audit";
-import { canManage, isPanelJudge, loadEvent, loadManagedEvent, teamOf } from "@/lib/server/events";
+import { loadEvent, loadManagedEvent, viewerForEvent } from "@/lib/server/events";
 import { badRequest, conflict, handle, readBody } from "@/lib/server/http";
 import { requireUser, resolveIdentity } from "@/lib/server/identity";
 import { eventPatch } from "@/lib/server/schemas";
@@ -35,8 +36,10 @@ type P = { event: string };
 export const GET = handle<P>(async (req, { event: ref }) => {
   const me = await resolveIdentity(req);
   const e = await loadEvent(ref, me);
+  const viewerPromise = viewerForEvent(e, me);
 
-  const [tracks, prizes, criteria, judges, announcements, [counts]] = await Promise.all([
+  const [viewer, tracks, prizes, criteria, judges, [counts]] = await Promise.all([
+    viewerPromise,
     db.select().from(track).where(eq(track.eventId, e.id)).orderBy(asc(track.position)),
     db
       .select()
@@ -61,12 +64,6 @@ export const GET = handle<P>(async (req, { event: ref }) => {
       .where(eq(eventJudge.eventId, e.id))
       .orderBy(asc(userTable.name)),
     db
-      .select()
-      .from(announcement)
-      .where(eq(announcement.eventId, e.id))
-      .orderBy(sql`${announcement.pinned} desc, ${announcement.createdAt} desc`)
-      .limit(5),
-    db
       .select({
         projects: sql<number>`(select count(*)::int from ${project} where ${project.eventId} = ${e.id} and ${project.status} = 'submitted')`,
         participants: sql<number>`(select count(*)::int from ${registration} where ${registration.eventId} = ${e.id})`,
@@ -75,21 +72,7 @@ export const GET = handle<P>(async (req, { event: ref }) => {
       .from(event)
       .where(eq(event.id, e.id)),
   ]);
-
-  let viewer = null;
-  if (me) {
-    const [reg] = await db
-      .select({ userId: registration.userId })
-      .from(registration)
-      .where(and(eq(registration.eventId, e.id), eq(registration.userId, me.userId)))
-      .limit(1);
-    viewer = {
-      registered: Boolean(reg),
-      team: await teamOf(e.id, me.userId),
-      isJudge: await isPanelJudge(e.id, me.userId),
-      canManage: canManage(me, e),
-    };
-  }
+  const announcements = await announcementsForEvent(e.id, viewer, 5);
 
   return { event: e, tracks, prizes, criteria, judges, announcements, counts, viewer };
 });
@@ -98,6 +81,12 @@ export const PATCH = handle<P>(async (req, { event: ref }) => {
   const me = await requireUser(req);
   const e = await loadManagedEvent(ref, me);
   const b = await readBody(req, eventPatch);
+  if (INTERNAL_INNOLAB_ONLY && b.workflow && b.workflow !== "innolab") {
+    throw badRequest("Cette plateforme accepte uniquement les événements Innovation Lab");
+  }
+  if (INTERNAL_INNOLAB_ONLY && b.maxTeamSize !== undefined && b.maxTeamSize !== 6) {
+    throw badRequest("Un projet Innovation Lab accepte au maximum 6 participants");
+  }
   const scheduleIssue = innolabScheduleIssue({ ...e, ...b });
   if (scheduleIssue) throw badRequest(scheduleIssue);
 

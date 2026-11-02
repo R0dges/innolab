@@ -1,19 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   CalendarClock,
   Compass,
   FolderKanban,
   PencilLine,
-  Plus,
   UsersRound,
 } from "lucide-react";
-import { toast } from "sonner";
 
 import { Badge } from "@juryza/ui/components/ui/badge";
 import { Button } from "@juryza/ui/components/ui/button";
@@ -27,57 +24,39 @@ import {
   EmptyTitle,
 } from "@juryza/ui/components/ui/empty";
 import { Skeleton } from "@juryza/ui/components/ui/skeleton";
-import { Spinner } from "@juryza/ui/components/ui/spinner";
 import { cn } from "@juryza/ui/lib/utils";
 
-import { coverStyle, EventCover } from "@/components/event-bits";
+import { coverStyle } from "@/components/event-bits";
 import { PageHeader, Section } from "@/components/page";
 import { api } from "@/lib/api";
-import { formatDateTime, hueOf, pluralize, relativeTime } from "@/lib/format";
-import { submissionsAreOpen } from "@/lib/phase";
+import { formatDateTime, hueOf, relativeTime } from "@/lib/format";
 import type { overviewFor } from "@/lib/server/people";
 import type { Json } from "@/lib/types";
 
 /**
  * My projects: every project the viewer works on, across events, with its
- * status and the time left to edit — plus a one-click "start a project" for
- * each event where they have a team but nothing started yet.
+ * status and the time left to edit. In Innovation Lab, projects are created
+ * automatically from the selected pitches.
  */
 
 type Overview = Json<Awaited<ReturnType<typeof overviewFor>>>;
 
 export default function ProjectsPage() {
-  const router = useRouter();
-  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["me", "overview"],
     queryFn: () => api.get<Overview>("/api/me/overview"),
   });
 
-  const start = useMutation({
-    mutationFn: (slug: string) =>
-      api.post<{ id: string }>(`/api/events/${slug}/projects`, { title: "Untitled project" }),
-    onSuccess: ({ id }) => {
-      void queryClient.invalidateQueries({ queryKey: ["me", "overview"] });
-      router.push(`/projects/${id}`);
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const withProject = new Set(data?.projects.map((p) => p.eventSlug));
-  const startable = (data?.participating ?? []).filter(
-    (e) => e.teamId && !withProject.has(e.slug) && submissionsAreOpen(e)
-  );
   const now = Date.now();
 
   return (
     <>
       <PageHeader
-        title="My projects"
-        description="Everything you're building, across every event. Drafts stay private to your team until you submit."
+        title="Mes projets"
+        description="Les pitchs retenus deviennent automatiquement des projets. Retrouvez ici ceux auxquels vous participez."
         actions={
           <Button variant="outline" nativeButton={false} render={<Link href="/events" />}>
-            <Compass /> Find an event
+            <Compass /> Voir les événements
           </Button>
         }
       />
@@ -91,43 +70,15 @@ export default function ProjectsPage() {
       ) : error ? (
         <Empty className="border">
           <EmptyHeader>
-            <EmptyTitle>Couldn't load your projects</EmptyTitle>
+            <EmptyTitle>Impossible de charger vos projets</EmptyTitle>
             <EmptyDescription>{error.message}</EmptyDescription>
           </EmptyHeader>
         </Empty>
-      ) : (
-        <>
-          {startable.length > 0 && (
+      ) : data?.projects.length ? (
             <Section
-              title="Ready to start"
-              description="Your team is set — start the project and fill it in together."
+              title="Vos projets"
+              description={`${data.projects.length} projet${data.projects.length > 1 ? "s" : ""}`}
             >
-              <div className="grid gap-3 md:grid-cols-2">
-                {startable.map((e) => (
-                  <Card key={e.id} className="flex-row items-center gap-4 border-dashed px-4 py-4">
-                    <EventCover hue={e.hue} className="size-12 shrink-0 rounded-lg" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{e.name}</p>
-                      <p className="text-muted-foreground truncate text-xs">
-                        Team {e.teamName} · closes {relativeTime(e.submissionsClose, now)}
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => start.mutate(e.slug)}
-                      disabled={start.isPending}
-                    >
-                      {start.isPending && start.variables === e.slug ? <Spinner /> : <Plus />} Start
-                      a project
-                    </Button>
-                  </Card>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {data?.projects.length ? (
-            <Section title="Your projects" description={pluralize(data.projects.length, "project")}>
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {data.projects.map((p) => {
                   const closes = new Date(p.submissionsClose).getTime();
@@ -164,7 +115,7 @@ export default function ProjectsPage() {
                           <div className="min-w-0">
                             <h3 className="truncate font-semibold">{p.title}</h3>
                             <p className="text-muted-foreground line-clamp-2 min-h-10 text-sm">
-                              {p.tagline || "No tagline yet"}
+                              {p.tagline || "Aucun résumé pour le moment"}
                             </p>
                           </div>
                           <div className="flex flex-wrap items-center gap-1.5">
@@ -176,7 +127,7 @@ export default function ProjectsPage() {
                           <div className="text-muted-foreground mt-auto flex items-center justify-between gap-2 border-t pt-3 text-xs">
                             <span className="flex items-center gap-1.5 truncate">
                               <UsersRound className="size-3.5 shrink-0" />
-                              {p.teamName} · edited {relativeTime(p.updatedAt, now)}
+                              {p.teamName} · modifié {relativeTime(p.updatedAt, now)}
                             </span>
                             {open ? (
                               <span
@@ -190,17 +141,18 @@ export default function ProjectsPage() {
                                 {relativeTime(closes, now)}
                               </span>
                             ) : (
-                              <span className="shrink-0">Closed</span>
+                              <span className="shrink-0">Terminé</span>
                             )}
                           </div>
                           {p.status === "draft" && open && (
                             <p className="bg-muted text-muted-foreground -mx-1 rounded-md px-2 py-1.5 text-xs">
-                              Draft — submit before {formatDateTime(closes)} so judges can see it.
+                              Brouillon — à finaliser avant le {formatDateTime(closes)} pour permettre
+                              l’évaluation par les coachs.
                             </p>
                           )}
                           <span className="text-primary flex items-center gap-1 text-sm font-medium">
                             <PencilLine className="size-3.5" />{" "}
-                            {open ? "Open editor" : "View project"}
+                            {open ? "Ouvrir l’éditeur" : "Voir le projet"}
                             <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
                           </span>
                         </CardContent>
@@ -210,28 +162,24 @@ export default function ProjectsPage() {
                 })}
               </div>
             </Section>
-          ) : (
-            startable.length === 0 && (
-              <Empty className="border">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <FolderKanban />
-                  </EmptyMedia>
-                  <EmptyTitle>No projects yet</EmptyTitle>
-                  <EmptyDescription>
-                    Join an event and form a team — then start your project here and write it up
-                    like a doc.
-                  </EmptyDescription>
-                </EmptyHeader>
-                <EmptyContent>
-                  <Button nativeButton={false} render={<Link href="/events" />}>
-                    <Compass /> Explore events
-                  </Button>
-                </EmptyContent>
-              </Empty>
-            )
-          )}
-        </>
+      ) : (
+            <Empty className="border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FolderKanban />
+                </EmptyMedia>
+                <EmptyTitle>Aucun projet pour le moment</EmptyTitle>
+                <EmptyDescription>
+                  Après l’évaluation des pitchs, les pitchs retenus deviennent automatiquement des
+                  projets que les participants peuvent rejoindre.
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button nativeButton={false} render={<Link href="/events" />}>
+                  <Compass /> Voir les événements
+                </Button>
+              </EmptyContent>
+            </Empty>
       )}
     </>
   );

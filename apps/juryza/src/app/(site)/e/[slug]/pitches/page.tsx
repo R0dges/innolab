@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Lightbulb, Pencil, Plus, Rocket, UsersRound, Vote } from "lucide-react";
+import { Check, Eye, Lightbulb, Pencil, Plus, Rocket, Vote } from "lucide-react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription, AlertTitle } from "@juryza/ui/components/ui/alert";
@@ -19,7 +19,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@juryza/ui/components/ui/card";
-import { Checkbox } from "@juryza/ui/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -37,15 +36,15 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@juryza/ui/components/ui/empty";
-import { Field, FieldGroup, FieldLabel } from "@juryza/ui/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@juryza/ui/components/ui/field";
 import { Input } from "@juryza/ui/components/ui/input";
 import { Skeleton } from "@juryza/ui/components/ui/skeleton";
 import { Spinner } from "@juryza/ui/components/ui/spinner";
 import { Textarea } from "@juryza/ui/components/ui/textarea";
 
 import { UserAvatar } from "@/components/user-avatar";
+import { useI18n } from "@/components/locale-provider";
 import { api } from "@/lib/api";
-import { pluralize } from "@/lib/format";
 
 type PitchStatus = "draft" | "submitted" | "selected" | "rejected";
 
@@ -74,15 +73,26 @@ interface PitchList {
     userId: string;
     registered: boolean;
     canManage: boolean;
+    canCoach: boolean;
     canCreate: boolean;
     canVote: boolean;
   };
   phase: {
     submissionsOpen: boolean;
+    presentationOpen: boolean;
+    presentationCanOpen: boolean;
     votingOpen: boolean;
     votingClosed: boolean;
     formationOpen: boolean;
     showVoteCounts: boolean;
+  };
+  selection: null | {
+    participantCount: number;
+    candidateCount: number;
+    recommended: { minimum: number; maximum: number };
+    finalized: boolean;
+    count: number | null;
+    finalizedAt: string | null;
   };
 }
 
@@ -97,6 +107,7 @@ const PITCH_SKELETONS = [
 export default function PitchesPage() {
   const { slug } = useParams<{ slug: string }>();
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   const { data, isLoading, error } = useQuery({
     queryKey: pitchesKey(slug),
     queryFn: () => api.get<PitchList>(`/api/events/${slug}/pitches`),
@@ -106,7 +117,7 @@ export default function PitchesPage() {
   if (error) {
     return (
       <Alert variant="destructive">
-        <AlertTitle>Could not load ideas</AlertTitle>
+        <AlertTitle>{t("pitches.loadError")}</AlertTitle>
         <AlertDescription>{error.message}</AlertDescription>
       </Alert>
     );
@@ -121,10 +132,9 @@ export default function PitchesPage() {
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex flex-col gap-1">
-          <h2 className="text-2xl font-semibold tracking-tight">Ideas</h2>
+          <h2 className="text-2xl font-semibold tracking-tight">{t("pitches.title")}</h2>
           <p className="text-muted-foreground max-w-2xl text-sm">
-            Propose the starting point, vote on submitted ideas, then turn the selected ones into
-            teams and projects.
+            {t("pitches.description")}
           </p>
         </div>
         {data.viewer?.canCreate && (
@@ -134,7 +144,7 @@ export default function PitchesPage() {
             trigger={
               <Button>
                 <Plus data-icon="inline-start" />
-                Propose an idea
+                {t("pitches.propose")}
               </Button>
             }
           />
@@ -142,8 +152,22 @@ export default function PitchesPage() {
       </div>
 
       <PhaseNotice data={data} />
-      {data.viewer?.canManage && data.phase.votingClosed && (
-        <SelectionPanel slug={slug} pitches={data.pitches} onSaved={refresh} />
+      {data.viewer?.canCoach && !data.phase.presentationOpen && (
+        <PresentationPanel slug={slug} canOpen={data.phase.presentationCanOpen} onSaved={refresh} />
+      )}
+      {data.viewer?.canCoach &&
+        data.phase.presentationOpen &&
+        data.phase.votingClosed &&
+        data.selection &&
+        !data.selection.finalized && (
+          <SelectionPanel slug={slug} selection={data.selection} onSaved={refresh} />
+        )}
+      {data.selection?.finalized && (
+        <Alert>
+          <Rocket />
+          <AlertTitle>{t("pitches.projectsCreated")}</AlertTitle>
+          <AlertDescription>{t("pitches.projectsCreatedHint")}</AlertDescription>
+        </Alert>
       )}
 
       {pitches.length === 0 ? (
@@ -152,11 +176,13 @@ export default function PitchesPage() {
             <EmptyMedia variant="icon">
               <Lightbulb />
             </EmptyMedia>
-            <EmptyTitle>No ideas yet</EmptyTitle>
+            <EmptyTitle>{t("pitches.none")}</EmptyTitle>
             <EmptyDescription>
-              {data.phase.submissionsOpen
-                ? "Start with a problem worth solving and a clear one-minute pitch."
-                : "No ideas were submitted during this edition."}
+              {!data.phase.presentationOpen
+                ? t("pitches.privateHint")
+                : data.phase.submissionsOpen
+                  ? t("pitches.startHint")
+                  : t("pitches.closedHint")}
             </EmptyDescription>
           </EmptyHeader>
           {data.viewer?.canCreate && (
@@ -164,7 +190,7 @@ export default function PitchesPage() {
               <PitchDialog
                 slug={slug}
                 onSaved={refresh}
-                trigger={<Button>Propose an idea</Button>}
+                trigger={<Button>{t("pitches.propose")}</Button>}
               />
             </EmptyContent>
           )}
@@ -189,23 +215,31 @@ export default function PitchesPage() {
 }
 
 function PhaseNotice({ data }: { data: PitchList }) {
+  const { t } = useI18n();
   if (!data.viewer) {
     return (
       <Alert>
         <Lightbulb />
-        <AlertTitle>Sign in to participate</AlertTitle>
-        <AlertDescription>Registered participants can propose ideas and vote.</AlertDescription>
+        <AlertTitle>{t("pitches.signIn")}</AlertTitle>
+        <AlertDescription>{t("pitches.signInHint")}</AlertDescription>
       </Alert>
     );
   }
-  if (!data.viewer.registered && !data.viewer.canManage) {
+  if (!data.viewer.registered && !data.viewer.canCoach) {
     return (
       <Alert>
         <Lightbulb />
-        <AlertTitle>Registration required</AlertTitle>
-        <AlertDescription>
-          Register from the event overview before proposing or voting.
-        </AlertDescription>
+        <AlertTitle>{t("pitches.registrationRequired")}</AlertTitle>
+        <AlertDescription>{t("pitches.registrationHint")}</AlertDescription>
+      </Alert>
+    );
+  }
+  if (!data.phase.presentationOpen) {
+    return (
+      <Alert>
+        <Eye />
+        <AlertTitle>{t("pitches.presentationWaiting")}</AlertTitle>
+        <AlertDescription>{t("pitches.presentationWaitingHint")}</AlertDescription>
       </Alert>
     );
   }
@@ -213,10 +247,8 @@ function PhaseNotice({ data }: { data: PitchList }) {
     return (
       <Alert>
         <Vote />
-        <AlertTitle>Idea voting is open</AlertTitle>
-        <AlertDescription>
-          Each voter can support each idea once. There is no global vote budget.
-        </AlertDescription>
+        <AlertTitle>{t("pitches.votingOpen")}</AlertTitle>
+        <AlertDescription>{t("pitches.votingOpenHint")}</AlertDescription>
       </Alert>
     );
   }
@@ -224,10 +256,8 @@ function PhaseNotice({ data }: { data: PitchList }) {
     return (
       <Alert>
         <Check />
-        <AlertTitle>Idea voting is closed</AlertTitle>
-        <AlertDescription>
-          Vote totals and the organizer's selection are now visible.
-        </AlertDescription>
+        <AlertTitle>{t("pitches.votingClosed")}</AlertTitle>
+        <AlertDescription>{t("pitches.votingClosedHint")}</AlertDescription>
       </Alert>
     );
   }
@@ -249,13 +279,14 @@ function PitchCard({
   phase: PitchList["phase"];
   onSaved: () => void;
 }) {
+  const { t } = useI18n();
   const vote = useMutation({
     mutationFn: () =>
       pitch.voted
         ? api.delete(`/api/pitches/${pitch.id}/vote`)
         : api.post(`/api/pitches/${pitch.id}/vote`),
     onSuccess: () => {
-      toast.success(pitch.voted ? "Vote removed" : "Vote recorded");
+      toast.success(pitch.voted ? t("pitches.voteRemoved") : t("pitches.voteRecorded"));
       onSaved();
     },
     onError: (error) => toast.error(error.message),
@@ -301,7 +332,7 @@ function PitchCard({
                   trigger={
                     <Button variant="ghost" size="sm">
                       <Pencil data-icon="inline-start" />
-                      Edit
+                      {t("pitches.edit")}
                     </Button>
                   }
                 />
@@ -311,21 +342,16 @@ function PitchCard({
           <CardContent className="pb-5">
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{pitch.description}</p>
           </CardContent>
-          {(pitch.projectId ||
-            (pitch.mine && pitch.status === "selected" && phase.formationOpen)) && (
+          {pitch.projectId && (
             <CardFooter className="border-t py-3">
-              {pitch.projectId ? (
-                <Button
-                  variant="outline"
-                  nativeButton={false}
-                  render={<Link href={`/projects/${pitch.projectId}`} />}
-                >
-                  <Rocket data-icon="inline-start" />
-                  Open project
-                </Button>
-              ) : (
-                <ProjectDialog pitch={pitch} onSaved={onSaved} />
-              )}
+              <Button
+                variant="outline"
+                nativeButton={false}
+                render={<Link href={`/projects/${pitch.projectId}`} />}
+              >
+                <Rocket data-icon="inline-start" />
+                {t("pitches.openProject")}
+              </Button>
             </CardFooter>
           )}
         </div>
@@ -334,10 +360,10 @@ function PitchCard({
             <div className="text-center">
               <p className="text-2xl font-semibold tabular-nums">{pitch.votes ?? "—"}</p>
               <p className="text-muted-foreground text-xs">
-                {pitch.votes === null ? "Hidden" : pluralize(pitch.votes, "vote")}
+                {pitch.votes === null ? t("pitches.hidden") : `${pitch.votes} ${t("pitches.votes")}`}
               </p>
             </div>
-            {viewer?.canVote && pitch.status === "submitted" && (
+            {viewer?.canVote && !pitch.mine && pitch.status === "submitted" && (
               <Button
                 variant={pitch.voted ? "default" : "outline"}
                 size="sm"
@@ -349,7 +375,7 @@ function PitchCard({
                 ) : (
                   <Vote data-icon="inline-start" />
                 )}
-                {pitch.voted ? "Supported" : "Support"}
+                {pitch.voted ? t("pitches.selected") : t("pitches.choose")}
               </Button>
             )}
           </div>
@@ -360,11 +386,12 @@ function PitchCard({
 }
 
 function StatusBadge({ status }: { status: PitchStatus }) {
+  const { t } = useI18n();
   const label = {
-    draft: "Draft",
-    submitted: "Submitted",
-    selected: "Selected",
-    rejected: "Not selected",
+    draft: t("pitches.status.draft"),
+    submitted: t("pitches.status.submitted"),
+    selected: t("pitches.status.selected"),
+    rejected: t("pitches.status.rejected"),
   }[status];
   return (
     <Badge
@@ -386,6 +413,7 @@ function PitchDialog({
   trigger: React.ReactElement;
   onSaved: () => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState(pitch?.title ?? "");
   const [description, setDescription] = useState(pitch?.description ?? "");
@@ -399,7 +427,7 @@ function PitchDialog({
           })
         : api.post(`/api/events/${slug}/pitches`, { title, description, submit }),
     onSuccess: (_result, submit) => {
-      toast.success(submit ? "Idea submitted" : "Draft saved");
+      toast.success(submit ? t("pitches.submitted") : t("pitches.saved"));
       setOpen(false);
       onSaved();
     },
@@ -411,15 +439,14 @@ function PitchDialog({
       <DialogTrigger render={trigger} />
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{pitch ? "Edit idea" : "Propose an idea"}</DialogTitle>
-          <DialogDescription>
-            Keep the one-minute pitch concrete. Once submitted, this text is frozen and remains
-            independent from the project.
-          </DialogDescription>
+          <DialogTitle>{pitch ? t("pitches.editTitle") : t("pitches.propose")}</DialogTitle>
+          <DialogDescription>{t("pitches.dialogHint")}</DialogDescription>
         </DialogHeader>
         <FieldGroup>
           <Field>
-            <FieldLabel htmlFor={`pitch-title-${pitch?.id ?? "new"}`}>Title</FieldLabel>
+            <FieldLabel htmlFor={`pitch-title-${pitch?.id ?? "new"}`}>
+              {t("pitches.fieldTitle")}
+            </FieldLabel>
             <Input
               id={`pitch-title-${pitch?.id ?? "new"}`}
               value={title}
@@ -431,7 +458,7 @@ function PitchDialog({
           </Field>
           <Field>
             <FieldLabel htmlFor={`pitch-description-${pitch?.id ?? "new"}`}>
-              One-minute pitch
+              {t("pitches.fieldBody")}
             </FieldLabel>
             <Textarea
               id={`pitch-description-${pitch?.id ?? "new"}`}
@@ -450,11 +477,12 @@ function PitchDialog({
             onClick={() => save.mutate(false)}
             disabled={!ready || save.isPending}
           >
-            {save.isPending && <Spinner data-icon="inline-start" />}Save draft
+            {save.isPending && <Spinner data-icon="inline-start" />}
+            {t("pitches.saveDraft")}
           </Button>
           <Button onClick={() => save.mutate(true)} disabled={!ready || save.isPending}>
             <Rocket data-icon="inline-start" />
-            Submit idea
+            {t("pitches.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -462,155 +490,162 @@ function PitchDialog({
   );
 }
 
-function SelectionPanel({
+function PresentationPanel({
   slug,
-  pitches,
+  canOpen,
   onSaved,
 }: {
   slug: string;
-  pitches: PitchRow[];
+  canOpen: boolean;
   onSaved: () => void;
 }) {
-  const candidates = useMemo(() => pitches.filter((pitch) => pitch.status !== "draft"), [pitches]);
-  const [selected, setSelected] = useState<string[]>([]);
-  useEffect(() => {
-    setSelected(candidates.filter((pitch) => pitch.status === "selected").map((pitch) => pitch.id));
-  }, [candidates]);
-  const minimum = Math.min(5, candidates.length);
-  const maximum = Math.min(6, candidates.length);
-  const valid = selected.length >= minimum && selected.length <= maximum;
-  const save = useMutation({
-    mutationFn: () => api.post(`/api/events/${slug}/pitch-selection`, { pitchIds: selected }),
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const { t } = useI18n();
+  const openPresentation = useMutation({
+    mutationFn: () => api.post(`/api/events/${slug}/pitch-presentation`),
     onSuccess: () => {
-      toast.success("Selected ideas updated");
+      toast.success(t("pitches.presentationOpened"));
+      setConfirmOpen(false);
       onSaved();
     },
     onError: (error) => toast.error(error.message),
   });
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Select the ideas that move forward</CardTitle>
-        <CardDescription>
-          Choose{" "}
-          {candidates.length < 5 ? `all ${candidates.length} submitted ideas` : "5 or 6 ideas"}. The
-          others remain archived as not selected.
-        </CardDescription>
+        <CardTitle>{t("pitches.presentationTitle")}</CardTitle>
+        <CardDescription>{t("pitches.presentationHint")}</CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-3 sm:grid-cols-2">
-        {candidates.map((pitch) => (
-          <label
-            htmlFor={`select-${pitch.id}`}
-            key={pitch.id}
-            className="flex cursor-pointer items-start gap-3 rounded-lg border p-3"
-          >
-            <Checkbox
-              id={`select-${pitch.id}`}
-              checked={selected.includes(pitch.id)}
-              disabled={!selected.includes(pitch.id) && selected.length >= maximum}
-              onCheckedChange={(checked) =>
-                setSelected((current) =>
-                  checked ? [...current, pitch.id] : current.filter((id) => id !== pitch.id)
-                )
-              }
-            />
-            <span className="min-w-0 text-sm">
-              <span className="block truncate font-medium">{pitch.title}</span>
-              <span className="text-muted-foreground">{pitch.votes ?? 0} votes</span>
-            </span>
-          </label>
-        ))}
-      </CardContent>
       <CardFooter className="justify-between gap-3">
-        <span className="text-muted-foreground text-sm tabular-nums">
-          {selected.length} selected
+        <span className="text-muted-foreground text-sm">
+          {canOpen ? t("pitches.submissionsClosed") : t("pitches.waitClose")}
         </span>
-        <Button disabled={!valid || save.isPending} onClick={() => save.mutate()}>
-          {save.isPending ? (
-            <Spinner data-icon="inline-start" />
-          ) : (
-            <Check data-icon="inline-start" />
-          )}
-          Save selection
-        </Button>
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogTrigger
+            render={
+              <Button disabled={!canOpen}>
+                <Eye data-icon="inline-start" />
+                {t("pitches.openPresentation")}
+              </Button>
+            }
+          />
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t("pitches.revealTitle")}</DialogTitle>
+              <DialogDescription>{t("pitches.revealHint")}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+                {t("pitches.cancel")}
+              </Button>
+              <Button
+                disabled={openPresentation.isPending}
+                onClick={() => openPresentation.mutate()}
+              >
+                {openPresentation.isPending ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <Eye data-icon="inline-start" />
+                )}
+                {t("pitches.reveal")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardFooter>
     </Card>
   );
 }
 
-function ProjectDialog({ pitch, onSaved }: { pitch: PitchRow; onSaved: () => void }) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [teamName, setTeamName] = useState("");
-  const [projectTitle, setProjectTitle] = useState(pitch.title);
-  const create = useMutation({
-    mutationFn: () =>
-      api.post<{ id: string }>(`/api/pitches/${pitch.id}/project`, { teamName, projectTitle }),
-    onSuccess: (result) => {
-      toast.success("Team and project created");
+function SelectionPanel({
+  slug,
+  selection,
+  onSaved,
+}: {
+  slug: string;
+  selection: NonNullable<PitchList["selection"]>;
+  onSaved: () => void;
+}) {
+  const initialCount = Math.min(
+    selection.candidateCount,
+    Math.max(1, selection.recommended.minimum)
+  );
+  const [count, setCount] = useState(initialCount);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const { t } = useI18n();
+  const valid = Number.isInteger(count) && count >= 1 && count <= selection.candidateCount;
+  const save = useMutation({
+    mutationFn: () => api.post(`/api/events/${slug}/pitch-selection`, { count }),
+    onSuccess: () => {
+      toast.success(t("pitches.projectsCreated"));
+      setConfirmOpen(false);
       onSaved();
-      router.push(`/projects/${result.id}`);
     },
     onError: (error) => toast.error(error.message),
   });
+  const recommendation =
+    selection.recommended.minimum === selection.recommended.maximum
+      ? `${selection.recommended.minimum}`
+      : `${selection.recommended.minimum}–${selection.recommended.maximum}`;
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          <Button>
-            <UsersRound data-icon="inline-start" />
-            Create team and project
-          </Button>
-        }
-      />
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Start building “{pitch.title}”</DialogTitle>
-          <DialogDescription>
-            This explicit action creates your team and a draft project linked to the original pitch.
-          </DialogDescription>
-        </DialogHeader>
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor={`team-${pitch.id}`}>Team name</FieldLabel>
-            <Input
-              id={`team-${pitch.id}`}
-              value={teamName}
-              onChange={(event) => setTeamName(event.target.value)}
-              minLength={2}
-              maxLength={60}
-              required
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`project-${pitch.id}`}>Project title</FieldLabel>
-            <Input
-              id={`project-${pitch.id}`}
-              value={projectTitle}
-              onChange={(event) => setProjectTitle(event.target.value)}
-              maxLength={100}
-              required
-            />
-          </Field>
-        </FieldGroup>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            disabled={create.isPending || teamName.trim().length < 2 || !projectTitle.trim()}
-            onClick={() => create.mutate()}
-          >
-            {create.isPending ? (
-              <Spinner data-icon="inline-start" />
-            ) : (
-              <Rocket data-icon="inline-start" />
-            )}
-            Create
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("pitches.selectionTitle")}</CardTitle>
+        <CardDescription>{t("pitches.selectionHint")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Field data-invalid={!valid}>
+          <FieldLabel htmlFor="retained-pitch-count">{t("pitches.selectionCount")}</FieldLabel>
+          <Input
+            id="retained-pitch-count"
+            type="number"
+            min={1}
+            max={selection.candidateCount}
+            value={count}
+            aria-invalid={!valid}
+            onChange={(event) => setCount(event.target.valueAsNumber)}
+          />
+          <FieldDescription>
+            {selection.participantCount} {t("pitches.participants")} · {t("pitches.recommendation")}
+            : {recommendation} {t("event.projects").toLowerCase()} {t("pitches.groups")} ·{" "}
+            {selection.candidateCount} {t("pitches.available")}.
+          </FieldDescription>
+        </Field>
+      </CardContent>
+      <CardFooter className="justify-end">
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogTrigger
+            render={
+              <Button disabled={!valid}>
+                <Check data-icon="inline-start" />
+                {t("pitches.finalize")}
+              </Button>
+            }
+          />
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t("pitches.confirmSelection")}</DialogTitle>
+              <DialogDescription>{t("pitches.confirmSelectionHint")}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+                {t("pitches.cancel")}
+              </Button>
+              <Button disabled={save.isPending} onClick={() => save.mutate()}>
+                {save.isPending ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <Rocket data-icon="inline-start" />
+                )}
+                {t("pitches.createProjects")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CardFooter>
+    </Card>
   );
 }
 

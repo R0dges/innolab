@@ -106,10 +106,46 @@ export default function VotingPage() {
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["votes", slug],
     queryFn: () => api.get<VotesData>(`/api/events/${slug}/votes`),
+    enabled: Boolean(detail && detail.event.workflow !== "innolab"),
     refetchInterval: 15_000,
   });
 
   const e = detail?.event;
+  if (e?.workflow === "innolab") {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader
+          title="Jury evaluation"
+          description="Innolab final projects are evaluated only by judges appointed by platform admins."
+        />
+        <Alert>
+          <AlertTitle>Community project voting is disabled</AlertTitle>
+          <AlertDescription className="flex flex-col items-start gap-3">
+            Participants cannot vote on final projects. Appoint the jury, assign submitted projects,
+            and collect rubric scores through the judge workspace.
+            <span className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                nativeButton={false}
+                render={<Link href={`/manage/${slug}/judges`} />}
+              >
+                Manage judges
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                nativeButton={false}
+                render={<Link href={`/manage/${slug}/assignments`} />}
+              >
+                Manage assignments
+              </Button>
+            </span>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
   const configured = e ? hasVoting(e) : true;
   const open = data?.open ?? (e ? votingIsOpen(e) : false);
   const access = ACCESS[e?.votingAccess ?? "authenticated"] ?? ACCESS.authenticated;

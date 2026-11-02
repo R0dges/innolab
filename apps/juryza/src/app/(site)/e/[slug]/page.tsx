@@ -8,8 +8,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   Award,
+  Building2,
   CalendarClock,
+  CalendarDays,
   Check,
+  CircleAlert,
+  Copy,
+  Database,
+  ExternalLink,
+  Eye,
+  FileSearch,
   Gavel,
   Layers,
   Lightbulb,
@@ -23,22 +31,52 @@ import {
   Settings2,
   Share2,
   Sparkles,
+  Target,
   Trophy,
   UserPlus,
   UsersRound,
   Vote,
+  Wrench,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { Alert, AlertDescription, AlertTitle } from "@juryza/ui/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@juryza/ui/components/ui/alert-dialog";
 import { Badge } from "@juryza/ui/components/ui/badge";
 import { Button } from "@juryza/ui/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@juryza/ui/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@juryza/ui/components/ui/dialog";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@juryza/ui/components/ui/empty";
 import { Input } from "@juryza/ui/components/ui/input";
 import { Separator } from "@juryza/ui/components/ui/separator";
 import { Skeleton } from "@juryza/ui/components/ui/skeleton";
@@ -46,14 +84,22 @@ import { Spinner } from "@juryza/ui/components/ui/spinner";
 import { cn } from "@juryza/ui/lib/utils";
 
 import { RichContent } from "@/components/editor/rich-content";
-import { Timeline } from "@/components/event-bits";
+import { NextMilestone, Timeline } from "@/components/event-bits";
+import { useI18n } from "@/components/locale-provider";
 import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/lib/api";
 import { formatDate, pluralize, relativeTime } from "@/lib/format";
 import { eventRegistrationIsOpen } from "@/lib/innolab";
+import type { TranslationKey } from "@/lib/i18n";
 import { hasVoting, phaseOf, submissionsAreOpen } from "@/lib/phase";
-import { type EventDetail, eventKey, useEvent } from "@/lib/queries";
-import { isEmptyDoc, parseRichDoc } from "@/lib/rich-text";
+import { type EventDashboard, type EventDetail, eventKey, useEventDashboard } from "@/lib/queries";
+import { docToText, isEmptyDoc, parseRichDoc } from "@/lib/rich-text";
+import {
+  SCHEDULE_AUDIENCE_LABELS,
+  SCHEDULE_KIND_LABELS,
+  type ScheduleAudience,
+  type ScheduleKind,
+} from "@/lib/schedule";
 
 import { CreateTeamDialog } from "./create-team-dialog";
 
@@ -65,7 +111,17 @@ import { CreateTeamDialog } from "./create-team-dialog";
 
 export default function EventOverviewPage() {
   const { slug } = useParams<{ slug: string }>();
-  const { data, isLoading } = useEvent(slug);
+  const { data, isLoading, error } = useEventDashboard(slug);
+  const { t } = useI18n();
+
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>{t("event.dashboardUnavailable")}</AlertTitle>
+        <AlertDescription>{error.message}</AlertDescription>
+      </Alert>
+    );
+  }
 
   if (isLoading || !data) {
     return (
@@ -81,60 +137,72 @@ export default function EventOverviewPage() {
 
   const { event: e } = data;
   return (
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-10">
-      <div className="flex min-w-0 flex-col gap-8">
-        {data.announcements.length > 0 && <Announcements items={data.announcements} />}
+    <div className="flex flex-col gap-8">
+      <PhaseFocus slug={slug} data={data} />
 
-        <section className="flex flex-col gap-3">
-          <h2 className="sr-only">About</h2>
-          <RichContent
-            doc={e.content}
-            empty={
-              <p className="text-muted-foreground">
-                {e.description || "The organizers haven't written an overview yet."}
-              </p>
-            }
-          />
-        </section>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-10">
+        <div className="flex min-w-0 flex-col gap-8">
+          {data.announcements.length > 0 && <Announcements items={data.announcements} />}
 
-        {data.tracks.length > 0 && <Tracks tracks={data.tracks} />}
-        {data.prizes.length > 0 && <Prizes data={data} />}
-        {data.criteria.length > 0 && <Criteria criteria={data.criteria} />}
+          <section className="flex flex-col gap-3">
+            <SectionTitle icon={Target}>{t("event.about")}</SectionTitle>
+            <RichContent
+              doc={e.content}
+              empty={
+                <p className="text-muted-foreground">
+                  {e.description || t("event.noOverview")}
+                </p>
+              }
+            />
+          </section>
 
-        {!isEmptyDoc(e.rules) && (
+          {(data.viewer?.registered || data.viewer?.isJudge || data.viewer?.canManage) && (
+            <AuditAndResources slug={slug} data={data} />
+          )}
+
+          {e.workflow === "innolab" && <InnolabJourney slug={slug} data={data} />}
+
+          <EventSchedule slug={slug} data={data} />
+
+          {data.tracks.length > 0 && <Tracks tracks={data.tracks} />}
+          {data.prizes.length > 0 && <Prizes data={data} />}
+          {data.criteria.length > 0 && <Criteria criteria={data.criteria} />}
+
+          {!isEmptyDoc(e.rules) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ScrollText className="text-muted-foreground size-4" /> {t("event.rules")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <RichContent
+                  doc={e.rules}
+                  empty={<p className="text-muted-foreground">{t("event.noRules")}</p>}
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {data.judges.length > 0 && <Judges judges={data.judges} />}
+        </div>
+
+        <aside className="flex flex-col gap-4 lg:sticky lg:top-32 lg:self-start">
+          <Participation slug={slug} data={data} />
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ScrollText className="text-muted-foreground size-4" /> Rules
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <CalendarClock className="text-muted-foreground size-4" /> {t("event.timeline")}
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <RichContent
-                doc={e.rules}
-                empty={<p className="text-muted-foreground">No rules published.</p>}
-              />
+            <CardContent className="pl-6">
+              <Timeline event={e} />
             </CardContent>
           </Card>
-        )}
-
-        {data.judges.length > 0 && <Judges judges={data.judges} />}
+          <KeyFacts data={data} />
+          <ShareCard name={e.name} />
+        </aside>
       </div>
-
-      <aside className="flex flex-col gap-4 lg:sticky lg:top-32 lg:self-start">
-        <Participation slug={slug} data={data} />
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <CalendarClock className="text-muted-foreground size-4" /> Timeline
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pl-6">
-            <Timeline event={e} />
-          </CardContent>
-        </Card>
-        <KeyFacts data={data} />
-        <ShareCard name={e.name} />
-      </aside>
     </div>
   );
 }
@@ -142,6 +210,771 @@ export default function EventOverviewPage() {
 /* ------------------------------------------------------------------ */
 /* Main column                                                        */
 /* ------------------------------------------------------------------ */
+
+const PHASE_FOCUS_KEYS = {
+  upcoming: {
+    title: "event.phase.upcoming.title",
+    description: "event.phase.upcoming.text",
+    action: "event.phase.upcoming.action",
+  },
+  pitching: {
+    title: "event.phase.pitching.title",
+    description: "event.phase.pitching.text",
+    action: "event.phase.pitching.action",
+  },
+  "pitch-voting": {
+    title: "event.phase.pitchVoting.title",
+    description: "event.phase.pitchVoting.text",
+    action: "event.phase.pitchVoting.action",
+  },
+  "team-formation": {
+    title: "event.phase.formation.title",
+    description: "event.phase.formation.text",
+    action: "event.phase.formation.action",
+  },
+  submissions: {
+    title: "event.phase.submissions.title",
+    description: "event.phase.submissions.text",
+    action: "event.phase.submissions.action",
+  },
+  judging: {
+    title: "event.phase.judging.title",
+    description: "event.phase.judging.text",
+    action: "event.phase.judging.action",
+  },
+  voting: {
+    title: "event.phase.judging.title",
+    description: "event.phase.judging.text",
+    action: "event.phase.judging.action",
+  },
+  results: {
+    title: "event.phase.results.title",
+    description: "event.phase.results.text",
+    action: "event.phase.results.action",
+  },
+} as const satisfies Record<
+  EventDashboard["phase"],
+  { title: TranslationKey; description: TranslationKey; action: TranslationKey }
+>;
+
+function PhaseFocus({ slug, data }: { slug: string; data: EventDashboard }) {
+  const { t } = useI18n();
+  const focus = PHASE_FOCUS_KEYS[data.phase];
+  const href =
+    data.phase === "results"
+      ? `/e/${slug}/leaderboard`
+      : data.phase === "voting"
+        ? `/e/${slug}/vote`
+        : ["upcoming", "pitching", "pitch-voting", "team-formation"].includes(data.phase)
+          ? `/e/${slug}/pitches`
+          : `/e/${slug}/projects`;
+  return (
+    <Card className="border-primary/20 bg-primary/5">
+      <CardContent className="grid gap-5 py-1 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="bg-primary text-primary-foreground grid size-10 shrink-0 place-items-center rounded-xl">
+            <Target className="size-5" />
+          </span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge>{t("event.currentPhase")}</Badge>
+              <NextMilestone event={data.event} />
+            </div>
+            <h2 className="text-lg font-semibold tracking-tight">{t(focus.title)}</h2>
+            <p className="text-muted-foreground text-sm">{t(focus.description)}</p>
+          </div>
+        </div>
+        <Button nativeButton={false} render={<Link href={href} />}>
+          {t(focus.action)} <ArrowRight data-icon="inline-end" />
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+const RESOURCE_GROUP = {
+  scope: {
+    label: "Scope under study",
+    description: "Systems and data sources included in the analysis.",
+    icon: Building2,
+  },
+  accessible: {
+    label: "Accessible resources",
+    description: "Resources the teams can actually consult or use.",
+    icon: Database,
+  },
+  tool: {
+    label: "Authorized tools",
+    description: "Applications and tools approved for project work.",
+    icon: Wrench,
+  },
+} as const;
+
+const ACCESS_LABEL: Record<string, string> = {
+  public: "Public",
+  event: "Participants & coaches",
+  restricted: "Restricted",
+};
+
+function AuditAndResources({ slug, data }: { slug: string; data: EventDashboard }) {
+  const audit = data.audit;
+  return (
+    <section className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <SectionTitle icon={FileSearch}>Audit and operational scope</SectionTitle>
+        {data.viewer?.canManage && (
+          <Button
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={<Link href={`/manage/${slug}/workspace`} />}
+          >
+            <Settings2 data-icon="inline-start" /> Manage content
+          </Button>
+        )}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="flex flex-col gap-1">
+              <CardTitle>{audit?.title ?? "Initial company audit"}</CardTitle>
+              <CardDescription>
+                {audit
+                  ? `Current document · version ${audit.version}`
+                  : "Read-only reference document"}
+              </CardDescription>
+            </div>
+            {audit && <Badge variant="secondary">Version {audit.version}</Badge>}
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-5">
+          {audit ? (
+            <>
+              {audit.summary && <p className="text-muted-foreground text-sm">{audit.summary}</p>}
+              <div className="grid gap-5 md:grid-cols-2">
+                <AuditList title="Main findings" items={audit.findings} />
+                <AuditList title="Identified problems" items={audit.problems} />
+              </div>
+              <Button
+                className="self-start"
+                nativeButton={false}
+                render={<a href={audit.url} target="_blank" rel="noreferrer" />}
+              >
+                Open the full audit <ExternalLink data-icon="inline-end" />
+              </Button>
+            </>
+          ) : (
+            <Empty className="border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FileSearch />
+                </EmptyMedia>
+                <EmptyTitle>No audit document published</EmptyTitle>
+                <EmptyDescription>
+                  The organizing team has not added the initial audit yet.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-col gap-3">
+        <SectionTitle icon={Database} hint={pluralize(data.resources.length, "resource")}>
+          Perimeter and resources
+        </SectionTitle>
+        {data.resources.length ? (
+          <div className="grid gap-4 xl:grid-cols-3">
+            {(Object.keys(RESOURCE_GROUP) as (keyof typeof RESOURCE_GROUP)[]).map((kind) => {
+              const group = RESOURCE_GROUP[kind];
+              const items = data.resources.filter((resource) => resource.kind === kind);
+              const Icon = group.icon;
+              return (
+                <Card key={kind} size="sm">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Icon className="text-muted-foreground size-4" /> {group.label}
+                    </CardTitle>
+                    <CardDescription>{group.description}</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {items.length ? (
+                      <ul className="flex flex-col gap-3">
+                        {items.map((resource) => (
+                          <li
+                            key={resource.id}
+                            className="flex flex-col gap-2 rounded-lg border p-3"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <p className="font-medium">{resource.name}</p>
+                                <p className="text-muted-foreground text-xs">{resource.category}</p>
+                              </div>
+                              <Badge
+                                variant={
+                                  resource.availability === "unavailable"
+                                    ? "destructive"
+                                    : "outline"
+                                }
+                              >
+                                {resource.availability}
+                              </Badge>
+                            </div>
+                            {resource.description && (
+                              <p className="text-muted-foreground text-sm">
+                                {resource.description}
+                              </p>
+                            )}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="secondary">
+                                {ACCESS_LABEL[resource.accessLevel] ?? resource.accessLevel}
+                              </Badge>
+                              {resource.ownerName && (
+                                <span className="text-muted-foreground text-xs">
+                                  Owner: {resource.ownerName}
+                                </span>
+                              )}
+                            </div>
+                            {resource.url && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="self-start"
+                                nativeButton={false}
+                                render={<a href={resource.url} target="_blank" rel="noreferrer" />}
+                              >
+                                Open resource <ExternalLink data-icon="inline-end" />
+                              </Button>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-muted-foreground py-4 text-center text-sm">
+                        Nothing listed in this category.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        ) : (
+          <Empty className="border">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Database />
+              </EmptyMedia>
+              <EmptyTitle>No operational resource listed</EmptyTitle>
+              <EmptyDescription>
+                Resources will appear here after the organizers define the working perimeter.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AuditList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {items.length ? (
+        <ul className="text-muted-foreground flex list-disc flex-col gap-1 pl-5 text-sm">
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground text-sm">No item documented.</p>
+      )}
+    </div>
+  );
+}
+
+function EventSchedule({ slug, data }: { slug: string; data: EventDashboard }) {
+  const queryClient = useQueryClient();
+  const [privateUrl, setPrivateUrl] = useState<string | null>(null);
+  const canSubscribe = Boolean(
+    data.viewer?.registered || data.viewer?.isJudge || data.viewer?.canManage
+  );
+  const subscriptionQuery = useQuery({
+    queryKey: [...eventKey(slug), "calendar-subscription"],
+    queryFn: () =>
+      api.get<{
+        subscription: null | {
+          id: string;
+          prefix: string;
+          createdAt: string;
+          lastUsedAt: string | null;
+        };
+      }>(`/api/events/${slug}/calendar-subscription`),
+    enabled: canSubscribe,
+  });
+  const createSubscription = useMutation({
+    mutationFn: () =>
+      api.post<{ url: string; prefix: string }>(`/api/events/${slug}/calendar-subscription`),
+    onSuccess: async (result) => {
+      setPrivateUrl(result.url);
+      toast.success("Private calendar link generated");
+      await queryClient.invalidateQueries({
+        queryKey: [...eventKey(slug), "calendar-subscription"],
+      });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const revokeSubscription = useMutation({
+    mutationFn: () => api.delete(`/api/events/${slug}/calendar-subscription`),
+    onSuccess: async () => {
+      setPrivateUrl(null);
+      toast.success("Calendar link revoked");
+      await queryClient.invalidateQueries({
+        queryKey: [...eventKey(slug), "calendar-subscription"],
+      });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const groups = data.schedule.reduce<Map<string, EventDashboard["schedule"]>>((map, item) => {
+    const key = new Date(item.startsAt).toDateString();
+    const group = map.get(key) ?? [];
+    group.push(item);
+    map.set(key, group);
+    return map;
+  }, new Map());
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <SectionTitle icon={CalendarDays} hint={pluralize(data.schedule.length, "activity")}>
+          Innovation Lab calendar
+        </SectionTitle>
+        {data.viewer?.canManage && (
+          <Button
+            variant="outline"
+            size="sm"
+            nativeButton={false}
+            render={<Link href={`/manage/${slug}/schedule`} />}
+          >
+            <Settings2 data-icon="inline-start" /> Manage calendar
+          </Button>
+        )}
+      </div>
+
+      {data.schedule.length ? (
+        <div className="flex flex-col gap-4">
+          {[...groups.entries()].map(([day, items]) => (
+            <Card key={day} size="sm">
+              <CardHeader>
+                <CardTitle className="text-base">
+                  {formatDate(items[0]?.startsAt, { dateStyle: "full" })}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="flex flex-col gap-4">
+                  {items.map((item) => (
+                    <li
+                      key={item.id}
+                      className="grid gap-2 border-b pb-4 last:border-0 last:pb-0 sm:grid-cols-[150px_minmax(0,1fr)]"
+                    >
+                      <div className="text-sm font-medium tabular-nums">
+                        {formatDate(item.startsAt, { timeStyle: "short" })} –{" "}
+                        {formatDate(item.endsAt, { timeStyle: "short" })}
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-2">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="font-medium">{item.title}</p>
+                            {item.location && (
+                              <p className="text-muted-foreground text-sm">{item.location}</p>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge variant="outline">
+                              {SCHEDULE_KIND_LABELS[item.kind as ScheduleKind] ?? item.kind}
+                            </Badge>
+                            {item.required && <Badge>Mandatory</Badge>}
+                          </div>
+                        </div>
+                        {item.description && (
+                          <p className="text-muted-foreground text-sm">{item.description}</p>
+                        )}
+                        <p className="text-muted-foreground text-xs">
+                          Audience:{" "}
+                          {SCHEDULE_AUDIENCE_LABELS[item.audience as ScheduleAudience] ??
+                            item.audience}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <CalendarDays />
+            </EmptyMedia>
+            <EmptyTitle>No activity scheduled</EmptyTitle>
+            <EmptyDescription>
+              The organizing team has not published the calendar yet.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
+
+      <Card size="sm">
+        <CardHeader>
+          <CardTitle className="text-base">Outlook and iCalendar</CardTitle>
+          <CardDescription>
+            Calendar applications decide their own refresh frequency; Juryza publishes updates
+            immediately.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {data.event.visibility === "published" ? (
+            <Button
+              variant="outline"
+              className="self-start"
+              nativeButton={false}
+              render={<a href={`/api/events/${slug}/calendar.ics`} />}
+            >
+              <CalendarDays data-icon="inline-start" /> Download public calendar
+            </Button>
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              The public feed becomes available when this event is published.
+            </p>
+          )}
+          {canSubscribe &&
+            (privateUrl ? (
+              <div className="flex flex-col gap-2">
+                <Input aria-label="Private calendar URL" value={privateUrl} readOnly />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(privateUrl);
+                      toast.success("Calendar URL copied");
+                    }}
+                  >
+                    <Copy data-icon="inline-start" /> Copy subscription URL
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    nativeButton={false}
+                    render={<a href={privateUrl} />}
+                  >
+                    <CalendarDays data-icon="inline-start" /> Open feed
+                  </Button>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  This secret URL is shown once. Add it to Outlook as an internet calendar and do
+                  not share it.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-start gap-2">
+                <Button
+                  onClick={() => createSubscription.mutate()}
+                  disabled={createSubscription.isPending || subscriptionQuery.isLoading}
+                >
+                  {createSubscription.isPending ? (
+                    <Spinner data-icon="inline-start" />
+                  ) : (
+                    <CalendarDays data-icon="inline-start" />
+                  )}
+                  {subscriptionQuery.data?.subscription
+                    ? "Replace private link"
+                    : "Generate private Outlook link"}
+                </Button>
+                {subscriptionQuery.data?.subscription && (
+                  <p className="text-muted-foreground text-xs">
+                    A private feed beginning with {subscriptionQuery.data.subscription.prefix}… is
+                    active. Replacing it revokes the previous URL.
+                  </p>
+                )}
+              </div>
+            ))}
+        </CardContent>
+        {subscriptionQuery.data?.subscription && (
+          <CardFooter className="justify-end border-t">
+            <AlertDialog>
+              <AlertDialogTrigger render={<Button variant="ghost" size="sm" />}>
+                <X data-icon="inline-start" /> Revoke private link
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Revoke the private calendar link?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Outlook and other calendar applications will no longer be able to refresh
+                    private activities with this URL.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Keep link</AlertDialogCancel>
+                  <Button
+                    variant="destructive"
+                    disabled={revokeSubscription.isPending}
+                    onClick={() => revokeSubscription.mutate()}
+                  >
+                    <X data-icon="inline-start" /> Revoke link
+                  </Button>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </CardFooter>
+        )}
+      </Card>
+    </section>
+  );
+}
+
+function projectJoinGuidance(
+  state: EventDashboard["selectedProjects"][number]["joinState"],
+  t: (key: TranslationKey) => string
+): string | null {
+  switch (state) {
+    case "sign-in-required":
+      return t("journey.join.signIn");
+    case "registration-required":
+      return t("journey.join.register");
+    case "team-pending":
+      return t("journey.join.pendingTeam");
+    case "requested":
+      return t("journey.join.requested");
+    case "already-on-team":
+      return t("journey.join.otherProject");
+    case "full":
+      return t("journey.join.full");
+    case "closed":
+      return t("journey.join.closed");
+    default:
+      return null;
+  }
+}
+
+function InnolabJourney({ slug, data }: { slug: string; data: EventDashboard }) {
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const beforeSelection = ["upcoming", "pitching", "pitch-voting"].includes(data.phase);
+  const ideas = data.ideas.slice(0, 3);
+  const canSeeOperationalData = Boolean(
+    data.viewer?.registered || data.viewer?.isJudge || data.viewer?.canManage
+  );
+  const canReviewRequests = Boolean(data.viewer?.isJudge || data.viewer?.canManage);
+  const joinProject = useMutation({
+    mutationFn: (teamId: string) =>
+      api.post<{ requestId: string; status: "pending" }>(`/api/teams/${teamId}/join`),
+    onSuccess: (_result, teamId) => {
+      toast.success(t("journey.requestSent"), {
+        description: t("journey.requestSentHint"),
+      });
+      queryClient.invalidateQueries({ queryKey: eventKey(slug) });
+      queryClient.invalidateQueries({ queryKey: ["team", teamId] });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  const cancelJoinRequest = useMutation({
+    mutationFn: (teamId: string) => api.delete<{ status: "cancelled" }>(`/api/teams/${teamId}/join`),
+    onSuccess: (_result, teamId) => {
+      toast.success(t("journey.requestCancelled"));
+      queryClient.invalidateQueries({ queryKey: eventKey(slug) });
+      queryClient.invalidateQueries({ queryKey: ["team", teamId] });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  if (beforeSelection) {
+    return (
+      <section className="flex flex-col gap-3">
+        <SectionTitle icon={Lightbulb} hint={String(data.ideas.length)}>
+          {t("journey.pitches")}
+        </SectionTitle>
+        {ideas.length ? (
+          <div className="grid gap-3 md:grid-cols-3">
+            {ideas.map((idea) => (
+              <Card key={idea.id} size="sm">
+                <CardHeader>
+                  <CardTitle className="line-clamp-2 text-base">{idea.title}</CardTitle>
+                  <CardDescription className="flex items-center gap-2">
+                    <UserAvatar
+                      name={idea.author.name}
+                      image={idea.author.image}
+                      className="size-5"
+                    />
+                    <span className="truncate">{idea.author.name}</span>
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-3">
+                  <p className="text-muted-foreground line-clamp-3 text-sm">{idea.description}</p>
+                  {idea.votes !== null && (
+                    <Badge variant="secondary" className="self-start">
+                      <Vote /> {pluralize(idea.votes, "vote")}
+                    </Badge>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <Alert>
+            <Lightbulb />
+            <AlertTitle>{t("journey.noPitch")}</AlertTitle>
+            <AlertDescription>{t("journey.noPitchHint")}</AlertDescription>
+          </Alert>
+        )}
+        <Button
+          variant="outline"
+          className="self-start"
+          nativeButton={false}
+          render={<Link href={`/e/${slug}/pitches`} />}
+        >
+          {t("journey.allPitches")} <ArrowRight data-icon="inline-end" />
+        </Button>
+      </section>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionTitle
+        icon={Rocket}
+        hint={String(data.selectedProjects.length)}
+      >
+        {t("journey.selectedProjects")}
+      </SectionTitle>
+      {data.selectedProjects.length ? (
+        <div className="grid gap-3 md:grid-cols-2">
+          {data.selectedProjects.map((selected) => {
+            const joining = joinProject.isPending && joinProject.variables === selected.team?.id;
+            const joinGuidance = projectJoinGuidance(selected.joinState, t);
+            const registrationLabel = !canSeeOperationalData
+              ? t("journey.selected")
+              : selected.team?.registrationState === "open"
+                ? t("journey.registrationOpen")
+                : selected.team?.registrationState === "full"
+                  ? t("journey.teamFull")
+                  : selected.team
+                    ? t("journey.registrationClosed")
+                    : t("journey.teamForming");
+            return (
+              <Card key={selected.pitchId} size="sm">
+                <CardHeader>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <CardTitle className="text-base">{selected.title}</CardTitle>
+                    <Badge
+                      variant={
+                        selected.team?.registrationState === "open" ? "default" : "secondary"
+                      }
+                    >
+                      {registrationLabel}
+                    </Badge>
+                  </div>
+                  <CardDescription>
+                    {t("journey.ledBy")} {selected.author.name}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-3">
+                  <p className="text-muted-foreground line-clamp-3 text-sm">
+                    {selected.description}
+                  </p>
+                  {selected.team ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span className="font-medium">{selected.team.name}</span>
+                      <span className="text-muted-foreground tabular-nums">
+                        {selected.team.memberCount}/{selected.team.capacity} {t("journey.members")}
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-sm">
+                      {canSeeOperationalData
+                        ? t("journey.ownerForming")
+                        : t("journey.signInDetails")}
+                    </p>
+                  )}
+                  {joinGuidance && <p className="text-muted-foreground text-xs">{joinGuidance}</p>}
+                </CardContent>
+                <CardFooter className="flex-wrap">
+                  {selected.joinState === "available" && selected.team && (
+                    <Button
+                      onClick={() => joinProject.mutate(selected.team?.id ?? "")}
+                      disabled={joinProject.isPending}
+                    >
+                      {joining ? (
+                        <Spinner data-icon="inline-start" />
+                      ) : (
+                        <UserPlus data-icon="inline-start" />
+                      )}
+                      {t("journey.request")}
+                    </Button>
+                  )}
+                  {selected.joinState === "requested" && selected.team && (
+                    <Button
+                      variant="outline"
+                      onClick={() => cancelJoinRequest.mutate(selected.team?.id ?? "")}
+                      disabled={cancelJoinRequest.isPending}
+                    >
+                      {cancelJoinRequest.isPending ? (
+                        <Spinner data-icon="inline-start" />
+                      ) : (
+                        <X data-icon="inline-start" />
+                      )}
+                      {t("journey.cancel")}
+                    </Button>
+                  )}
+                  {selected.joinState === "joined" && selected.team && (
+                    <Button
+                      nativeButton={false}
+                      render={<Link href={`/teams/${selected.team.id}`} />}
+                    >
+                      <UsersRound data-icon="inline-start" /> {t("journey.myProject")}
+                    </Button>
+                  )}
+                  {canReviewRequests && selected.team && (
+                    <Button
+                      variant="outline"
+                      nativeButton={false}
+                      render={<Link href={`/teams/${selected.team.id}`} />}
+                    >
+                      <UsersRound data-icon="inline-start" /> {t("journey.reviewRequests")}
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    nativeButton={false}
+                    render={
+                      <Link
+                        href={
+                          selected.projectId
+                            ? `/projects/${selected.projectId}`
+                            : `/e/${slug}/pitches`
+                        }
+                      />
+                    }
+                  >
+                    {t("journey.openProject")} <ArrowRight data-icon="inline-end" />
+                  </Button>
+                </CardFooter>
+              </Card>
+            );
+          })}
+        </div>
+      ) : (
+        <Alert>
+          <CircleAlert />
+          <AlertTitle>{t("journey.notPublished")}</AlertTitle>
+          <AlertDescription>{t("journey.notPublishedHint")}</AlertDescription>
+        </Alert>
+      )}
+    </section>
+  );
+}
 
 function SectionTitle({
   icon: Icon,
@@ -165,24 +998,70 @@ function SectionTitle({
 function Announcements({ items }: { items: EventDetail["announcements"] }) {
   return (
     <section className="flex flex-col gap-3">
-      <SectionTitle icon={Megaphone}>Announcements</SectionTitle>
+      <SectionTitle icon={Megaphone} hint="From the organizing team">
+        Important communications
+      </SectionTitle>
       <div className="flex flex-col gap-2">
-        {items.map((a) => (
-          <div
-            key={a.id}
-            className={cn(
-              "flex flex-col gap-1 rounded-xl border p-4",
-              a.pinned && "border-primary/30 bg-primary/5"
-            )}
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              {a.pinned && <Pin className="text-primary size-3.5" aria-label="Pinned" />}
-              <p className="font-medium">{a.title}</p>
-              <span className="text-muted-foreground text-xs">{relativeTime(a.createdAt)}</span>
-            </div>
-            <RichContent doc={parseRichDoc(a.body)} className="text-muted-foreground text-sm" />
-          </div>
-        ))}
+        {items.map((a) => {
+          const document = parseRichDoc(a.body);
+          const summary = docToText(document, 260);
+          return (
+            <Card
+              key={a.id}
+              size="sm"
+              className={cn(
+                a.pinned && "border-primary/30 bg-primary/5",
+                a.priority === "urgent" && "border-destructive/40"
+              )}
+            >
+              <CardHeader>
+                <div className="flex flex-wrap items-center gap-2">
+                  {a.pinned && <Pin className="text-primary size-3.5" aria-label="Pinned" />}
+                  <Badge
+                    variant={
+                      a.priority === "urgent"
+                        ? "destructive"
+                        : a.priority === "important"
+                          ? "outline"
+                          : "secondary"
+                    }
+                  >
+                    {a.priority}
+                  </Badge>
+                  <CardTitle className="text-base">{a.title}</CardTitle>
+                </div>
+                <CardDescription className="flex flex-wrap items-center gap-2">
+                  <UserAvatar
+                    name={a.authorName ?? "Organizer"}
+                    image={a.authorImage}
+                    className="size-5"
+                  />
+                  <span>{a.authorName ?? "Organizing team"}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{relativeTime(a.createdAt)}</span>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col items-start gap-3">
+                <p className="text-muted-foreground line-clamp-3 text-sm">{summary}</p>
+                <Dialog>
+                  <DialogTrigger render={<Button variant="ghost" size="sm" />}>
+                    <Eye data-icon="inline-start" /> Read full communication
+                  </DialogTrigger>
+                  <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>{a.title}</DialogTitle>
+                      <DialogDescription>
+                        Published by {a.authorName ?? "the organizing team"}{" "}
+                        {relativeTime(a.createdAt)}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <RichContent doc={document} />
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
     </section>
   );
@@ -368,6 +1247,7 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
   const open = submissionsAreOpen(e);
   const phase = phaseOf(e);
   const next = encodeURIComponent(`/e/${slug}`);
+  const { t: translate } = useI18n();
 
   const teamQuery = useQuery({
     queryKey: ["team", v?.team?.id],
@@ -378,7 +1258,7 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
   const register = useMutation({
     mutationFn: () => api.post(`/api/events/${slug}/registration`),
     onSuccess: () => {
-      toast.success("You're registered");
+      toast.success(translate("event.registered"));
       queryClient.invalidateQueries({ queryKey: eventKey(slug) });
     },
     onError: (err) => toast.error(err.message),
@@ -400,10 +1280,10 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
       body = (
         <>
           <p className="text-muted-foreground text-sm">
-            Create an account to register, propose an idea and take part in the preselection.
+            {translate("event.signInToParticipate")}
           </p>
-          <Button nativeButton={false} render={<Link href={`/signup?next=${next}`} />}>
-            <UserPlus /> Sign up to participate
+          <Button nativeButton={false} render={<Link href={`/login?next=${next}`} />}>
+            <LogIn /> {translate("site.signIn")}
           </Button>
         </>
       );
@@ -421,7 +1301,7 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
           </Link>
           {t?.project && (
             <Button nativeButton={false} render={<Link href={`/projects/${t.project.id}`} />}>
-              <Rocket /> Open project
+              <Rocket /> {translate("event.openProject")}
             </Button>
           )}
           <Button
@@ -429,7 +1309,7 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
             nativeButton={false}
             render={<Link href={`/e/${slug}/pitches`} />}
           >
-            <Lightbulb /> View original ideas
+            <Lightbulb /> {translate("event.originalPitches")}
           </Button>
         </>
       );
@@ -437,11 +1317,10 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
       body = (
         <>
           <p className="text-muted-foreground text-sm">
-            Register without a team. You can propose an idea first and form a team only if it is
-            selected.
+            {translate("event.registerHint")}
           </p>
           <Button onClick={() => register.mutate()} disabled={register.isPending}>
-            {register.isPending ? <Spinner /> : <Check />} Register for {e.name}
+            {register.isPending ? <Spinner /> : <Check />} {translate("event.register")}
           </Button>
         </>
       );
@@ -450,14 +1329,14 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
         <>
           {v.registered && (
             <div className="bg-success/10 text-success flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium">
-              <Check className="size-4" /> You're registered
+              <Check className="size-4" /> {translate("event.registered")}
             </div>
           )}
           <p className="text-muted-foreground text-sm">
-            Ideas, voting, selection and project creation all continue from the Innolab board.
+            {translate("event.boardHint")}
           </p>
           <Button nativeButton={false} render={<Link href={`/e/${slug}/pitches`} />}>
-            <Lightbulb /> Open ideas
+            <Lightbulb /> {translate("event.openPitches")}
           </Button>
         </>
       );
@@ -622,7 +1501,7 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
   return (
     <Card className="border-primary/20 ring-primary/15 shadow-sm">
       <CardHeader>
-        <CardTitle>Your participation</CardTitle>
+        <CardTitle>{translate("event.participation")}</CardTitle>
         <CardDescription>{v ? "What you can do next" : "Join the event"}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

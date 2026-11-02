@@ -67,6 +67,14 @@ import {
   InputGroupText,
 } from "@juryza/ui/components/ui/input-group";
 import { RadioGroup, RadioGroupItem } from "@juryza/ui/components/ui/radio-group";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@juryza/ui/components/ui/select";
 import { Separator } from "@juryza/ui/components/ui/separator";
 import { Slider } from "@juryza/ui/components/ui/slider";
 import { Spinner } from "@juryza/ui/components/ui/spinner";
@@ -76,10 +84,17 @@ import { coverStyle, EventCover } from "@/components/event-bits";
 import { PageHeader } from "@/components/page";
 import { useViewer } from "@/components/viewer";
 import { ApiError, api } from "@/lib/api";
+import {
+  DEFAULT_EVENT_LOCATION,
+  DEFAULT_EVENT_MODE,
+  DEFAULT_EVENT_WORKFLOW,
+  type EventMode,
+  type EventWorkflow,
+  eventLocationOptions,
+} from "@/lib/event-options";
 import { formatDateTime, pluralize } from "@/lib/format";
 import { hasAtLeast } from "@/lib/roles";
 
-type Mode = "online" | "in-person" | "hybrid";
 type Access = "authenticated" | "email" | "open";
 
 interface Draft {
@@ -87,9 +102,14 @@ interface Draft {
   slug: string;
   slugEdited: boolean;
   tagline: string;
-  mode: Mode;
+  mode: EventMode;
   location: string;
+  workflow: EventWorkflow;
   hue: number;
+  pitchSubmissionsOpen: string;
+  pitchSubmissionsClose: string;
+  pitchVotingOpen: string;
+  pitchVotingClose: string;
   submissionsOpen: string;
   submissionsClose: string;
   judgingClose: string;
@@ -105,27 +125,25 @@ interface Draft {
 }
 
 const STEPS = [
-  { key: "basics", label: "Basics", icon: Sparkles },
-  { key: "schedule", label: "Schedule", icon: CalendarClock },
-  { key: "tracks", label: "Tracks", icon: Tags },
-  { key: "rules", label: "Rules & settings", icon: UsersRound },
-  { key: "review", label: "Review", icon: Rocket },
+  { key: "basics", label: "Informations", icon: Sparkles },
+  { key: "schedule", label: "Calendrier", icon: CalendarClock },
+  { key: "tracks", label: "Axes", icon: Tags },
+  { key: "rules", label: "Règles", icon: UsersRound },
+  { key: "review", label: "Vérification", icon: Rocket },
 ] as const;
 
 const HUES = [250, 285, 320, 10, 45, 150, 185, 215];
 const TRACK_SUGGESTIONS = [
-  "AI & machine learning",
-  "Developer tools",
-  "Climate",
-  "Health",
-  "Education",
-  "Fintech",
-  "Accessibility",
-  "Security",
-  "Open source",
-  "Social impact",
-  "Hardware & IoT",
-  "Best beginner project",
+  "Intelligence artificielle",
+  "Outils internes",
+  "Climat",
+  "Santé",
+  "Formation",
+  "Accessibilité",
+  "Sécurité",
+  "Impact social",
+  "Processus métier",
+  "Qualité de service",
 ];
 
 const slugify = (s: string) =>
@@ -156,42 +174,47 @@ const addHours = (d: Date, h: number) => new Date(d.getTime() + h * 3_600_000);
 
 type Schedule = Pick<
   Draft,
-  "submissionsOpen" | "submissionsClose" | "judgingClose" | "votingOpen" | "votingClose"
+  | "pitchSubmissionsOpen"
+  | "pitchSubmissionsClose"
+  | "pitchVotingOpen"
+  | "pitchVotingClose"
+  | "submissionsOpen"
+  | "submissionsClose"
+  | "judgingClose"
+  | "votingOpen"
+  | "votingClose"
 >;
 
-/** Submissions run `hours` from the next `day` at `hour`; judging and voting take `reviewHours` after. */
-function preset(day: number, hour: number, hours: number, reviewHours: number): Schedule {
-  const open = nextWeekday(day, hour);
-  const close = addHours(open, hours);
+/** Recommended one-week journey: prepare Friday, present Monday at 10, finish Friday. */
+function innolabWeekPreset(): Schedule {
+  const pitchSubmissionsOpen = nextWeekday(5, 9);
+  const pitchSubmissionsClose = addHours(pitchSubmissionsOpen, 3 * 24 + 1);
+  const pitchVotingOpen = pitchSubmissionsClose;
+  const pitchVotingClose = addHours(pitchVotingOpen, 2);
+  const submissionsOpen = addHours(pitchVotingClose, 1);
+  const submissionsClose = addHours(pitchSubmissionsOpen, 7 * 24 + 7);
   return {
-    submissionsOpen: toLocalInput(open),
-    submissionsClose: toLocalInput(close),
-    judgingClose: toLocalInput(addHours(close, reviewHours)),
-    votingOpen: toLocalInput(close),
-    votingClose: toLocalInput(addHours(close, reviewHours)),
+    pitchSubmissionsOpen: toLocalInput(pitchSubmissionsOpen),
+    pitchSubmissionsClose: toLocalInput(pitchSubmissionsClose),
+    pitchVotingOpen: toLocalInput(pitchVotingOpen),
+    pitchVotingClose: toLocalInput(pitchVotingClose),
+    submissionsOpen: toLocalInput(submissionsOpen),
+    submissionsClose: toLocalInput(submissionsClose),
+    judgingClose: toLocalInput(addHours(submissionsClose, 2)),
+    votingOpen: "",
+    votingClose: "",
   };
 }
 
-const PRESETS: { label: string; hint: string; build: () => Schedule }[] = [
+const PRESETS: {
+  label: string;
+  hint: string;
+  build: () => Schedule;
+}[] = [
   {
-    label: "48-hour hackathon",
-    hint: "Starts next Friday 18:00",
-    build: () => preset(5, 18, 48, 24),
-  },
-  {
-    label: "72-hour hackathon",
-    hint: "Starts next Friday 18:00 (3 days)",
-    build: () => preset(5, 18, 72, 24),
-  },
-  {
-    label: "One-week sprint",
-    hint: "Monday 09:00 → Monday 09:00",
-    build: () => preset(1, 9, 7 * 24, 72),
-  },
-  {
-    label: "Month-long challenge",
-    hint: "30 days, one week of judging",
-    build: () => preset(1, 9, 30 * 24, 7 * 24),
+    label: "Semaine Innovation Lab",
+    hint: "Préparation vendredi, pitchs lundi à 10 h, projets jusqu’au vendredi",
+    build: innolabWeekPreset,
   },
 ];
 
@@ -200,16 +223,21 @@ const initial = (): Draft => ({
   slug: "",
   slugEdited: false,
   tagline: "",
-  mode: "online",
-  location: "",
+  mode: DEFAULT_EVENT_MODE,
+  location: DEFAULT_EVENT_LOCATION,
+  workflow: DEFAULT_EVENT_WORKFLOW,
   hue: 250,
+  pitchSubmissionsOpen: "",
+  pitchSubmissionsClose: "",
+  pitchVotingOpen: "",
+  pitchVotingClose: "",
   submissionsOpen: "",
   submissionsClose: "",
   judgingClose: "",
   votingOpen: "",
   votingClose: "",
   tracks: [],
-  maxTeamSize: 4,
+  maxTeamSize: 6,
   reviewsPerProject: 3,
   votingAccess: "authenticated",
   domains: "",
@@ -222,37 +250,53 @@ type Errors = Partial<Record<keyof Draft, string>>;
 function validate(step: number, d: Draft): Errors {
   const e: Errors = {};
   if (step === 0) {
-    if (d.name.trim().length < 3) e.name = "Give the event a name (at least 3 characters)";
-    if (d.slug.length < 3) e.slug = "At least 3 characters";
+    if (d.name.trim().length < 3) e.name = "Indiquez un nom d’au moins 3 caractères";
+    if (d.slug.length < 3) e.slug = "Au moins 3 caractères";
     else if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(d.slug))
-      e.slug = "Lowercase letters, numbers and single dashes only";
+      e.slug = "Uniquement des minuscules, des chiffres et des tirets simples";
     else if (["import", "new", "api", "admin", "settings"].includes(d.slug))
-      e.slug = "That URL is reserved";
-    if (d.tagline.length > 140) e.tagline = "Keep it under 140 characters";
-    if (d.mode !== "online" && !d.location.trim()) e.location = "Where is it happening?";
+      e.slug = "Cette adresse est réservée";
+    if (d.tagline.length > 140) e.tagline = "Maximum 140 caractères";
+    if (d.mode !== "online" && !d.location.trim()) e.location = "Indiquez le lieu";
   }
   if (step === 1) {
+    const pitchOpen = time(d.pitchSubmissionsOpen);
+    const pitchClose = time(d.pitchSubmissionsClose);
+    const pitchVoteOpen = time(d.pitchVotingOpen);
+    const pitchVoteClose = time(d.pitchVotingClose);
     const open = time(d.submissionsOpen);
     const close = time(d.submissionsClose);
     const judging = time(d.judgingClose);
     const vOpen = time(d.votingOpen);
     const vClose = time(d.votingClose);
-    if (close === null) e.submissionsClose = "The submission deadline is required";
+    if (d.workflow === "innolab") {
+      if (pitchClose === null) e.pitchSubmissionsClose = "La clôture des pitchs est obligatoire";
+      if (pitchVoteOpen === null) e.pitchVotingOpen = "Le début de l’évaluation est obligatoire";
+      if (pitchVoteClose === null) e.pitchVotingClose = "La fin de l’évaluation est obligatoire";
+      if (pitchOpen !== null && pitchClose !== null && pitchOpen >= pitchClose)
+        e.pitchSubmissionsClose = "Doit être postérieure à l’ouverture des pitchs";
+      if (pitchClose !== null && pitchVoteOpen !== null && pitchVoteOpen < pitchClose)
+        e.pitchVotingOpen = "Doit être postérieure à la clôture des pitchs";
+      if (pitchVoteOpen !== null && pitchVoteClose !== null && pitchVoteOpen >= pitchVoteClose)
+        e.pitchVotingClose = "Doit être postérieure au début de l’évaluation";
+      if (pitchVoteClose !== null && open !== null && open < pitchVoteClose)
+        e.submissionsOpen = "Les projets doivent commencer après l’évaluation des pitchs";
+    }
+    if (close === null) e.submissionsClose = "La fin des projets est obligatoire";
     if (open !== null && close !== null && open >= close)
-      e.submissionsClose = "Must be after submissions open";
+      e.submissionsClose = "Doit être postérieure au début des projets";
     if (judging !== null && close !== null && judging <= close)
-      e.judgingClose = "Judging must close after the submission deadline";
-    if (vOpen !== null && vClose !== null && vOpen >= vClose)
+      e.judgingClose = "L’évaluation doit se terminer après la fin des projets";
+    if (d.workflow === "standard" && vOpen !== null && vClose !== null && vOpen >= vClose)
       e.votingClose = "Must be after voting opens";
-    if (vClose !== null && close !== null && vClose <= close)
+    if (d.workflow === "standard" && vClose !== null && close !== null && vClose <= close)
       e.votingClose = "Voting should close after the submission deadline";
   }
   if (step === 3) {
-    if (d.maxTeamSize < 1 || d.maxTeamSize > 20) e.maxTeamSize = "Between 1 and 20";
     if (d.reviewsPerProject < 1 || d.reviewsPerProject > 10)
       e.reviewsPerProject = "Between 1 and 10";
     if (d.voteBudget < 1 || d.voteBudget > 400) e.voteBudget = "Between 1 and 400";
-    if (d.votingAccess === "email" && !parseDomains(d.domains).length)
+    if (d.workflow === "standard" && d.votingAccess === "email" && !parseDomains(d.domains).length)
       e.domains = "Add at least one allowed email domain";
   }
   return e;
@@ -266,7 +310,7 @@ const parseDomains = (s: string) =>
 
 export default function NewEventPage() {
   const viewer = useViewer();
-  const organizer = hasAtLeast(viewer?.role, "organizer");
+  const coach = hasAtLeast(viewer?.role, "judge");
   const router = useRouter();
   const queryClient = useQueryClient();
   const [step, setStep] = useState(0);
@@ -276,7 +320,9 @@ export default function NewEventPage() {
 
   // Default schedule is computed in the browser (local timezone), not during SSR.
   useEffect(() => {
-    setD((prev) => (prev.submissionsClose ? prev : { ...prev, ...preset(5, 18, 48, 24) }));
+    setD((prev) =>
+      prev.submissionsClose ? prev : { ...prev, ...innolabWeekPreset() }
+    );
   }, []);
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => {
@@ -292,22 +338,27 @@ export default function NewEventPage() {
         tagline: d.tagline.trim() || null,
         mode: d.mode,
         location: d.mode === "online" ? null : d.location.trim() || null,
+        workflow: "innolab",
         hue: d.hue,
         visibility: d.publish ? "published" : "draft",
+        pitchSubmissionsOpen: d.workflow === "innolab" ? iso(d.pitchSubmissionsOpen) : null,
+        pitchSubmissionsClose: d.workflow === "innolab" ? iso(d.pitchSubmissionsClose) : null,
+        pitchVotingOpen: d.workflow === "innolab" ? iso(d.pitchVotingOpen) : null,
+        pitchVotingClose: d.workflow === "innolab" ? iso(d.pitchVotingClose) : null,
         submissionsOpen: iso(d.submissionsOpen),
         submissionsClose: iso(d.submissionsClose),
         judgingClose: iso(d.judgingClose),
-        votingOpen: iso(d.votingOpen),
-        votingClose: iso(d.votingClose),
+        votingOpen: d.workflow === "standard" ? iso(d.votingOpen) : null,
+        votingClose: d.workflow === "standard" ? iso(d.votingClose) : null,
         tracks: d.tracks,
-        maxTeamSize: d.maxTeamSize,
+        maxTeamSize: 6,
         reviewsPerProject: d.reviewsPerProject,
         votingAccess: d.votingAccess,
         votingEmailDomains: d.votingAccess === "email" ? parseDomains(d.domains) : [],
         voteBudget: d.voteBudget,
       }),
     onSuccess: async (res) => {
-      toast.success(d.publish ? "Event created and published" : "Draft event created");
+      toast.success(d.publish ? "Événement créé et publié" : "Brouillon créé");
       await queryClient.invalidateQueries({ queryKey: ["me", "overview"] });
       await queryClient.invalidateQueries({ queryKey: ["manage", "events"] });
       router.push(`/manage/${res.slug}`);
@@ -341,22 +392,22 @@ export default function NewEventPage() {
     setStep(i);
   };
 
-  if (!organizer) {
+  if (!coach) {
     return (
       <Empty className="border">
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <ShieldAlert />
           </EmptyMedia>
-          <EmptyTitle>Organizer role required</EmptyTitle>
+          <EmptyTitle>Rôle de coach nécessaire</EmptyTitle>
           <EmptyDescription>
-            Creating and running events is available to organizers. Ask a platform admin to upgrade
-            your account, or explore events you can join in the meantime.
+            Seuls les coachs peuvent créer et conduire un événement. Un administrateur peut attribuer
+            ce rôle à votre compte.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
           <Button variant="outline" nativeButton={false} render={<Link href="/events" />}>
-            Explore events
+            Voir les événements
           </Button>
         </EmptyContent>
       </Empty>
@@ -368,11 +419,11 @@ export default function NewEventPage() {
       <PageHeader
         eyebrow={
           <Link href="/manage" className="hover:text-foreground inline-flex items-center gap-1">
-            <ArrowLeft className="size-3.5" /> My events
+            <ArrowLeft className="size-3.5" /> Mes événements
           </Link>
         }
-        title="Create an event"
-        description="Five quick steps. Everything can be changed later from the event's console."
+        title="Créer un événement Innovation Lab"
+        description="Cinq étapes pour préparer le parcours. Les informations resteront modifiables ensuite."
       />
 
       <Stepper step={step} onSelect={goTo} />
@@ -381,7 +432,7 @@ export default function NewEventPage() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Step {step + 1} · {STEPS[step]?.label}
+              Étape {step + 1} · {STEPS[step]?.label}
             </CardTitle>
             <CardDescription>{STEP_HELP[step]}</CardDescription>
           </CardHeader>
@@ -393,7 +444,7 @@ export default function NewEventPage() {
             {step === 4 && <ReviewStep d={d} set={set} onEdit={setStep} />}
             {serverError && step === 4 && (
               <Alert variant="destructive" className="mt-6">
-                <AlertTitle>Couldn't create the event</AlertTitle>
+                <AlertTitle>Impossible de créer l’événement</AlertTitle>
                 <AlertDescription>{serverError}</AlertDescription>
               </Alert>
             )}
@@ -404,11 +455,11 @@ export default function NewEventPage() {
               onClick={() => setStep((s) => Math.max(0, s - 1))}
               disabled={step === 0}
             >
-              <ArrowLeft /> Back
+              <ArrowLeft /> Retour
             </Button>
             {step < STEPS.length - 1 ? (
               <Button onClick={next}>
-                Continue <ArrowRight />
+                Continuer <ArrowRight />
               </Button>
             ) : (
               <Button
@@ -419,7 +470,7 @@ export default function NewEventPage() {
                 disabled={create.isPending}
               >
                 {create.isPending ? <Spinner /> : <Rocket />}
-                {d.publish ? "Create & publish" : "Create draft"}
+                {d.publish ? "Créer et publier" : "Créer le brouillon"}
               </Button>
             )}
           </CardFooter>
@@ -427,17 +478,17 @@ export default function NewEventPage() {
 
         <aside className="flex flex-col gap-3 lg:sticky lg:top-20 lg:self-start">
           <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-            Preview
+            Aperçu
           </p>
           <Card className="gap-0 overflow-hidden py-0">
             <EventCover hue={d.hue} className="flex h-32 items-end p-4">
               <span className="text-lg font-semibold text-white drop-shadow">
-                {d.name.trim() || "Your event"}
+                {d.name.trim() || "Votre événement"}
               </span>
             </EventCover>
             <CardContent className="flex flex-col gap-2 p-4 text-sm">
               <p className="text-muted-foreground line-clamp-2">
-                {d.tagline || "A one-line tagline appears here."}
+                {d.tagline || "Une courte description apparaîtra ici."}
               </p>
               <p className="flex items-center gap-1.5">
                 <ModeIcon mode={d.mode} className="text-muted-foreground size-3.5" />
@@ -448,7 +499,7 @@ export default function NewEventPage() {
               </p>
               {d.submissionsClose && (
                 <p className="text-muted-foreground text-xs">
-                  Deadline {formatDateTime(new Date(d.submissionsClose))}
+                  Fin des projets : {formatDateTime(new Date(d.submissionsClose))}
                 </p>
               )}
               {d.tracks.length > 0 && (
@@ -464,7 +515,7 @@ export default function NewEventPage() {
             </CardContent>
           </Card>
           <p className="text-muted-foreground font-mono text-xs break-all">
-            /e/{d.slug || "your-event"}
+            /e/{d.slug || "votre-evenement"}
           </p>
         </aside>
       </div>
@@ -473,16 +524,16 @@ export default function NewEventPage() {
 }
 
 const STEP_HELP = [
-  "Name your event and pick its look. The URL is generated from the name — you can edit it.",
-  "When submissions open and close, when judging ends, and the community voting window.",
-  "Tracks are the categories projects compete in. Optional — you can add them later.",
-  "Team size, how many judges review each project, and who may vote.",
-  "Check everything, then create. Drafts are only visible to you until published.",
+  "Nommez l’événement, indiquez son format et personnalisez sa couverture.",
+  "Planifiez la préparation des pitchs, leur évaluation, les projets et leur évaluation finale.",
+  "Les axes permettent de regrouper les projets. Ils restent facultatifs.",
+  "Définissez la taille des groupes et les règles d’évaluation des projets.",
+  "Vérifiez les informations avant de créer l’événement.",
 ];
 
 function Stepper({ step, onSelect }: { step: number; onSelect: (i: number) => void }) {
   return (
-    <nav aria-label="Progress">
+    <nav aria-label="Progression">
       <ol className="flex items-center gap-2 overflow-x-auto pb-1">
         {STEPS.map((s, i) => {
           const done = i < step;
@@ -525,7 +576,7 @@ function Stepper({ step, onSelect }: { step: number; onSelect: (i: number) => vo
   );
 }
 
-function ModeIcon({ mode, className }: { mode: Mode; className?: string }) {
+function ModeIcon({ mode, className }: { mode: EventMode; className?: string }) {
   const Icon = mode === "online" ? Laptop : mode === "in-person" ? MapPin : Globe;
   return <Icon className={className} />;
 }
@@ -533,16 +584,18 @@ function ModeIcon({ mode, className }: { mode: Mode; className?: string }) {
 type SetFn = <K extends keyof Draft>(k: K, v: Draft[K]) => void;
 
 function BasicsStep({ d, set, errors }: { d: Draft; set: SetFn; errors: Errors }) {
+  const locationOptions = eventLocationOptions(d.location);
+
   return (
     <FieldGroup>
       <Field data-invalid={Boolean(errors.name)}>
-        <FieldLabel htmlFor="name">Event name</FieldLabel>
+        <FieldLabel htmlFor="name">Nom de l’événement</FieldLabel>
         <Input
           id="name"
           autoFocus
           value={d.name}
           maxLength={80}
-          placeholder="Spring Build Weekend 2027"
+          placeholder="Innovation Lab — octobre 2027"
           aria-invalid={Boolean(errors.name)}
           onChange={(e) => {
             set("name", e.target.value);
@@ -553,7 +606,7 @@ function BasicsStep({ d, set, errors }: { d: Draft; set: SetFn; errors: Errors }
       </Field>
 
       <Field data-invalid={Boolean(errors.slug)}>
-        <FieldLabel htmlFor="slug">Public URL</FieldLabel>
+        <FieldLabel htmlFor="slug">Adresse de l’événement</FieldLabel>
         <InputGroup>
           <InputGroupAddon>
             <InputGroupText>/e/</InputGroupText>
@@ -574,7 +627,7 @@ function BasicsStep({ d, set, errors }: { d: Draft; set: SetFn; errors: Errors }
           <FieldError>{errors.slug}</FieldError>
         ) : (
           <FieldDescription>
-            Your event will live at{" "}
+            L’événement sera accessible à l’adresse{" "}
             <span className="text-foreground font-mono">/e/{d.slug || "…"}</span>
             {d.slugEdited && (
               <>
@@ -587,7 +640,7 @@ function BasicsStep({ d, set, errors }: { d: Draft; set: SetFn; errors: Errors }
                     set("slugEdited", false);
                   }}
                 >
-                  reset from name
+                  recalculer depuis le nom
                 </button>
               </>
             )}
@@ -596,32 +649,37 @@ function BasicsStep({ d, set, errors }: { d: Draft; set: SetFn; errors: Errors }
       </Field>
 
       <Field data-invalid={Boolean(errors.tagline)}>
-        <FieldLabel htmlFor="tagline">Tagline</FieldLabel>
+        <FieldLabel htmlFor="tagline">Description courte</FieldLabel>
         <Input
           id="tagline"
           value={d.tagline}
-          placeholder="Build something people want in 48 hours."
+          placeholder="Le problème étudié pendant cette semaine d’Innovation Lab."
           onChange={(e) => set("tagline", e.target.value)}
         />
         <FieldDescription className="flex justify-between">
-          <span>Shown on cards and at the top of the event page.</span>
+          <span>Affichée sur les cartes et en tête de la page.</span>
           <span className="tabular-nums">{d.tagline.length}/140</span>
         </FieldDescription>
         <FieldError>{errors.tagline}</FieldError>
       </Field>
 
       <Field>
-        <FieldTitle>Format</FieldTitle>
+        <FieldTitle>Modalité</FieldTitle>
         <RadioGroup
           value={d.mode}
-          onValueChange={(v) => set("mode", v as Mode)}
+          onValueChange={(value) => {
+            const mode = value as EventMode;
+            set("mode", mode);
+            if (mode === "online") set("location", "");
+            else if (!d.location) set("location", DEFAULT_EVENT_LOCATION);
+          }}
           className="grid gap-2 sm:grid-cols-3"
         >
           {(
             [
-              ["online", "Online", "Remote, anywhere"],
-              ["in-person", "In person", "One venue"],
-              ["hybrid", "Hybrid", "Venue + remote"],
+              ["online", "En ligne", "À distance"],
+              ["in-person", "En présentiel", "Un lieu unique"],
+              ["hybrid", "Hybride", "Sur place et à distance"],
             ] as const
           ).map(([value, label, hint]) => (
             <FieldLabel key={value} htmlFor={`mode-${value}`}>
@@ -641,20 +699,31 @@ function BasicsStep({ d, set, errors }: { d: Draft; set: SetFn; errors: Errors }
 
       {d.mode !== "online" && (
         <Field data-invalid={Boolean(errors.location)}>
-          <FieldLabel htmlFor="location">Location</FieldLabel>
-          <Input
-            id="location"
+          <FieldLabel htmlFor="location">Lieu</FieldLabel>
+          <Select
+            items={locationOptions}
             value={d.location}
-            maxLength={120}
-            placeholder="Auckland Town Hall, Auckland"
-            onChange={(e) => set("location", e.target.value)}
-          />
+            onValueChange={(value) => value && set("location", value)}
+          >
+            <SelectTrigger id="location" className="w-full" aria-invalid={Boolean(errors.location)}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {locationOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           <FieldError>{errors.location}</FieldError>
         </Field>
       )}
 
       <Field>
-        <FieldTitle>Cover colour</FieldTitle>
+        <FieldTitle>Couleur de couverture</FieldTitle>
         <div className="flex flex-wrap items-center gap-2">
           {HUES.map((h) => (
             <button
@@ -710,7 +779,7 @@ function DateField({
     <Field data-invalid={Boolean(error)}>
       <FieldLabel htmlFor={id}>
         {label}
-        {optional ? <span className="text-muted-foreground font-normal">(optional)</span> : null}
+        {optional ? <span className="text-muted-foreground font-normal">(facultatif)</span> : null}
       </FieldLabel>
       <div className="flex gap-2">
         <Input
@@ -724,7 +793,7 @@ function DateField({
           <Button
             variant="ghost"
             size="icon"
-            aria-label={`Clear ${label}`}
+            aria-label={`Effacer ${label}`}
             onClick={() => onChange("")}
           >
             <X />
@@ -755,7 +824,7 @@ function ScheduleStep({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <p className="text-sm font-medium">Start from a preset</p>
+        <p className="text-sm font-medium">Appliquer le calendrier recommandé</p>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {PRESETS.map((p) => (
             <button
@@ -772,20 +841,63 @@ function ScheduleStep({
       </div>
       <Separator />
       <FieldGroup>
+        {d.workflow === "innolab" && (
+          <>
+            <FieldDescription>
+              Le parcours commence par la préparation des pitchs, leur présentation et leur
+              évaluation par les participants. Les pitchs retenus deviennent ensuite des projets.
+            </FieldDescription>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <DateField
+                id="pitchSubmissionsOpen"
+                label="Ouverture de la préparation des pitchs"
+                hint="Recommandation : vendredi matin."
+                value={d.pitchSubmissionsOpen}
+                onChange={(value) => set("pitchSubmissionsOpen", value)}
+                error={errors.pitchSubmissionsOpen}
+              />
+              <DateField
+                id="pitchSubmissionsClose"
+                label="Clôture des pitchs et début de la présentation"
+                optional={false}
+                value={d.pitchSubmissionsClose}
+                onChange={(value) => set("pitchSubmissionsClose", value)}
+                error={errors.pitchSubmissionsClose}
+              />
+              <DateField
+                id="pitchVotingOpen"
+                label="Ouverture de l’évaluation des pitchs"
+                optional={false}
+                value={d.pitchVotingOpen}
+                onChange={(value) => set("pitchVotingOpen", value)}
+                error={errors.pitchVotingOpen}
+              />
+              <DateField
+                id="pitchVotingClose"
+                label="Clôture de l’évaluation des pitchs"
+                optional={false}
+                value={d.pitchVotingClose}
+                onChange={(value) => set("pitchVotingClose", value)}
+                error={errors.pitchVotingClose}
+              />
+            </div>
+            <Separator />
+          </>
+        )}
         <div className="grid gap-5 sm:grid-cols-2">
           <DateField
             id="submissionsOpen"
-            label="Submissions open"
-            hint="Leave empty to open immediately."
+            label="Début des projets"
+            hint="Après la sélection automatique des pitchs retenus."
             value={d.submissionsOpen}
             onChange={(v) => set("submissionsOpen", v)}
             error={errors.submissionsOpen}
           />
           <DateField
             id="submissionsClose"
-            label="Submission deadline"
+            label="Fin du travail sur les projets"
             optional={false}
-            hint="Projects lock at this moment."
+            hint="Les projets sont verrouillés à cet instant."
             value={d.submissionsClose}
             onChange={(v) => set("submissionsClose", v)}
             error={errors.submissionsClose}
@@ -793,32 +905,34 @@ function ScheduleStep({
         </div>
         <DateField
           id="judgingClose"
-          label="Judging closes"
-          hint="Judges can't score after this."
+          label="Fin de l’évaluation des projets"
+          hint="Les coachs ne peuvent plus modifier leurs évaluations après cette date."
           value={d.judgingClose}
           onChange={(v) => set("judgingClose", v)}
           error={errors.judgingClose}
         />
-        <div className="grid gap-5 sm:grid-cols-2">
-          <DateField
-            id="votingOpen"
-            label="Community voting opens"
-            value={d.votingOpen}
-            onChange={(v) => set("votingOpen", v)}
-            error={errors.votingOpen}
-          />
-          <DateField
-            id="votingClose"
-            label="Community voting closes"
-            hint="Leave both empty to skip the community vote."
-            value={d.votingClose}
-            onChange={(v) => set("votingClose", v)}
-            error={errors.votingClose}
-          />
-        </div>
+        {d.workflow === "standard" && (
+          <div className="grid gap-5 sm:grid-cols-2">
+            <DateField
+              id="votingOpen"
+              label="Community voting opens"
+              value={d.votingOpen}
+              onChange={(v) => set("votingOpen", v)}
+              error={errors.votingOpen}
+            />
+            <DateField
+              id="votingClose"
+              label="Community voting closes"
+              hint="Leave both empty to skip the community vote."
+              value={d.votingClose}
+              onChange={(v) => set("votingClose", v)}
+              error={errors.votingClose}
+            />
+          </div>
+        )}
       </FieldGroup>
       <p className="text-muted-foreground text-xs">
-        Times are in your timezone ({tz}) and stored in UTC.
+        Les horaires utilisent votre fuseau ({tz}) et sont enregistrés en UTC.
       </p>
     </div>
   );
@@ -845,12 +959,12 @@ function TracksStep({ d, set }: { d: Draft; set: SetFn }) {
         <Input
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="Add a track, e.g. Climate"
-          aria-label="Track name"
+          placeholder="Ajouter un axe, par ex. Qualité de service"
+          aria-label="Nom de l’axe"
           maxLength={60}
         />
         <Button type="submit" variant="outline" disabled={!value.trim()}>
-          <Plus /> Add
+          <Plus /> Ajouter
         </Button>
       </form>
 
@@ -864,7 +978,7 @@ function TracksStep({ d, set }: { d: Draft; set: SetFn }) {
               {t}
               <button
                 type="button"
-                aria-label={`Remove ${t}`}
+                aria-label={`Retirer ${t}`}
                 onClick={() =>
                   set(
                     "tracks",
@@ -880,7 +994,7 @@ function TracksStep({ d, set }: { d: Draft; set: SetFn }) {
         </div>
       ) : (
         <p className="text-muted-foreground rounded-lg border border-dashed p-4 text-center text-sm">
-          No tracks yet — every project will compete in a single pool.
+          Aucun axe — tous les projets resteront dans le même ensemble.
         </p>
       )}
 
@@ -942,174 +1056,154 @@ function RulesStep({ d, set, errors }: { d: Draft; set: SetFn; errors: Errors })
   const maxVotes = Math.floor(Math.sqrt(Math.max(1, d.voteBudget || 1)));
   return (
     <FieldGroup>
-      <div className="grid gap-5 sm:grid-cols-2">
-        <NumberField
-          id="maxTeamSize"
-          label="Max team size"
-          hint="Solo entries are always allowed."
-          value={d.maxTeamSize}
-          min={1}
-          max={20}
-          onChange={(n) => set("maxTeamSize", n)}
-          error={errors.maxTeamSize}
-        />
-        <NumberField
-          id="reviewsPerProject"
-          label="Reviews per project"
-          hint="Independent judges who score each project."
-          value={d.reviewsPerProject}
-          min={1}
-          max={10}
-          onChange={(n) => set("reviewsPerProject", n)}
-          error={errors.reviewsPerProject}
-        />
-      </div>
+      <Alert>
+        <UsersRound />
+        <AlertTitle>Groupes de 5 à 6 participants</AlertTitle>
+        <AlertDescription>
+          Chaque projet accepte au maximum 6 participants. La sélection des pitchs vise des groupes
+          d’au moins 5 participants, sans empêcher la constitution progressive des groupes.
+        </AlertDescription>
+      </Alert>
 
-      <Separator />
+      {d.workflow === "standard" && (
+        <>
+          <Separator />
 
-      <Field>
-        <FieldTitle>
-          <Vote className="size-4" /> Who can vote in the community vote?
-        </FieldTitle>
-        <RadioGroup value={d.votingAccess} onValueChange={(v) => set("votingAccess", v as Access)}>
-          {(
-            [
-              [
-                "authenticated",
-                "Signed-in users",
-                "Anyone with a Juryza account. One ballot per account.",
-              ],
-              [
-                "email",
-                "Verified email",
-                "Voters confirm an email address, optionally restricted to your domains.",
-              ],
-              [
-                "open",
-                "Open link",
-                "Anyone with the link. Easiest, but least resistant to ballot stuffing.",
-              ],
-            ] as const
-          ).map(([value, label, hint]) => (
-            <FieldLabel key={value} htmlFor={`access-${value}`}>
-              <Field orientation="horizontal">
-                <RadioGroupItem value={value} id={`access-${value}`} />
-                <FieldContent>
-                  <FieldTitle>{label}</FieldTitle>
-                  <FieldDescription>{hint}</FieldDescription>
-                </FieldContent>
-              </Field>
-            </FieldLabel>
-          ))}
-        </RadioGroup>
-      </Field>
+          <Field>
+            <FieldTitle>
+              <Vote className="size-4" /> Who can vote in the community vote?
+            </FieldTitle>
+            <RadioGroup
+              value={d.votingAccess}
+              onValueChange={(v) => set("votingAccess", v as Access)}
+            >
+              {(
+                [
+                  [
+                    "authenticated",
+                    "Signed-in users",
+                    "Anyone with a Juryza account. One ballot per account.",
+                  ],
+                  [
+                    "email",
+                    "Verified email",
+                    "Voters confirm an email address, optionally restricted to your domains.",
+                  ],
+                  [
+                    "open",
+                    "Open link",
+                    "Anyone with the link. Easiest, but least resistant to ballot stuffing.",
+                  ],
+                ] as const
+              ).map(([value, label, hint]) => (
+                <FieldLabel key={value} htmlFor={`access-${value}`}>
+                  <Field orientation="horizontal">
+                    <RadioGroupItem value={value} id={`access-${value}`} />
+                    <FieldContent>
+                      <FieldTitle>{label}</FieldTitle>
+                      <FieldDescription>{hint}</FieldDescription>
+                    </FieldContent>
+                  </Field>
+                </FieldLabel>
+              ))}
+            </RadioGroup>
+          </Field>
 
-      {d.votingAccess === "email" && (
-        <Field data-invalid={Boolean(errors.domains)}>
-          <FieldLabel htmlFor="domains">Allowed email domains</FieldLabel>
-          <Input
-            id="domains"
-            value={d.domains}
-            placeholder="university.edu, company.com"
-            onChange={(e) => set("domains", e.target.value)}
-          />
-          {errors.domains ? (
-            <FieldError>{errors.domains}</FieldError>
-          ) : (
-            <FieldDescription>
-              Comma-separated. Only addresses at these domains can verify and vote.
-            </FieldDescription>
+          {d.votingAccess === "email" && (
+            <Field data-invalid={Boolean(errors.domains)}>
+              <FieldLabel htmlFor="domains">Allowed email domains</FieldLabel>
+              <Input
+                id="domains"
+                value={d.domains}
+                placeholder="university.edu, company.com"
+                onChange={(e) => set("domains", e.target.value)}
+              />
+              {errors.domains ? (
+                <FieldError>{errors.domains}</FieldError>
+              ) : (
+                <FieldDescription>
+                  Comma-separated. Only addresses at these domains can verify and vote.
+                </FieldDescription>
+              )}
+            </Field>
           )}
-        </Field>
-      )}
 
-      <div className="grid gap-5 sm:grid-cols-[200px_1fr]">
-        <NumberField
-          id="voteBudget"
-          label="Vote credits per voter"
-          hint="Quadratic voting budget."
-          value={d.voteBudget}
-          min={1}
-          max={400}
-          onChange={(n) => set("voteBudget", n)}
-          error={errors.voteBudget}
-        />
-        <div className="bg-muted/50 flex flex-col gap-2 rounded-lg p-4 text-sm">
-          <p className="font-medium">How quadratic voting works</p>
-          <p className="text-muted-foreground">
-            Casting <em>n</em> votes on one project costs <em>n²</em> credits, so strong preferences
-            get expensive and a loud minority can't dominate.
-          </p>
-          <p className="text-muted-foreground">
-            With {pluralize(d.voteBudget || 0, "credit")}, a voter could put{" "}
-            <span className="text-foreground font-medium tabular-nums">{maxVotes}</span> votes on a
-            single project, or 1 vote on each of{" "}
-            <span className="text-foreground font-medium tabular-nums">{d.voteBudget || 0}</span>{" "}
-            projects.
-          </p>
-        </div>
-      </div>
+          <div className="grid gap-5 sm:grid-cols-[200px_1fr]">
+            <NumberField
+              id="voteBudget"
+              label="Vote credits per voter"
+              hint="Quadratic voting budget."
+              value={d.voteBudget}
+              min={1}
+              max={400}
+              onChange={(n) => set("voteBudget", n)}
+              error={errors.voteBudget}
+            />
+            <div className="bg-muted/50 flex flex-col gap-2 rounded-lg p-4 text-sm">
+              <p className="font-medium">How quadratic voting works</p>
+              <p className="text-muted-foreground">
+                Casting <em>n</em> votes on one project costs <em>n²</em> credits, so strong
+                preferences get expensive and a loud minority can't dominate.
+              </p>
+              <p className="text-muted-foreground">
+                With {pluralize(d.voteBudget || 0, "credit")}, a voter could put{" "}
+                <span className="text-foreground font-medium tabular-nums">{maxVotes}</span> votes
+                on a single project, or 1 vote on each of{" "}
+                <span className="text-foreground font-medium tabular-nums">
+                  {d.voteBudget || 0}
+                </span>{" "}
+                projects.
+              </p>
+            </div>
+          </div>
+        </>
+      )}
     </FieldGroup>
   );
 }
 
 function ReviewStep({ d, set, onEdit }: { d: Draft; set: SetFn; onEdit: (step: number) => void }) {
   const dt = (v: string) => (v ? formatDateTime(new Date(v)) : "—");
-  const accessLabel = {
-    authenticated: "Signed-in users",
-    email: "Verified email",
-    open: "Open link",
-  }[d.votingAccess];
   const groups: { step: number; title: string; rows: [string, React.ReactNode][] }[] = [
     {
       step: 0,
-      title: "Basics",
+      title: "Informations",
       rows: [
-        ["Name", d.name],
+        ["Nom", d.name],
         [
-          "URL",
+          "Adresse",
           <span key="u" className="font-mono">
             /e/{d.slug}
           </span>,
         ],
-        ["Tagline", d.tagline || "—"],
-        ["Format", `${d.mode}${d.mode !== "online" && d.location ? ` · ${d.location}` : ""}`],
+        ["Description", d.tagline || "—"],
+        ["Parcours", "Innovation Lab"],
+        ["Modalité", `${d.mode}${d.mode !== "online" && d.location ? ` · ${d.location}` : ""}`],
       ],
     },
     {
       step: 1,
-      title: "Schedule",
+      title: "Calendrier",
       rows: [
-        ["Submissions open", d.submissionsOpen ? dt(d.submissionsOpen) : "Immediately"],
-        ["Submission deadline", dt(d.submissionsClose)],
-        ["Judging closes", dt(d.judgingClose)],
         [
-          "Voting",
-          d.votingOpen || d.votingClose
-            ? `${dt(d.votingOpen)} → ${dt(d.votingClose)}`
-            : "No community vote",
+          "Préparation des pitchs",
+          `${d.pitchSubmissionsOpen ? dt(d.pitchSubmissionsOpen) : "Immédiatement"} → ${dt(d.pitchSubmissionsClose)}`,
         ],
+        ["Évaluation des pitchs", `${dt(d.pitchVotingOpen)} → ${dt(d.pitchVotingClose)}`],
+        ["Début des projets", d.submissionsOpen ? dt(d.submissionsOpen) : "Immédiatement"],
+        ["Fin des projets", dt(d.submissionsClose)],
+        ["Fin des évaluations", dt(d.judgingClose)],
       ],
     },
     {
       step: 2,
-      title: "Tracks",
-      rows: [["Tracks", d.tracks.length ? d.tracks.join(", ") : "None"]],
+      title: "Axes",
+      rows: [["Axes", d.tracks.length ? d.tracks.join(", ") : "Aucun"]],
     },
     {
       step: 3,
-      title: "Rules & settings",
-      rows: [
-        ["Max team size", d.maxTeamSize],
-        ["Reviews per project", d.reviewsPerProject],
-        [
-          "Voting access",
-          d.votingAccess === "email"
-            ? `${accessLabel} (${parseDomains(d.domains).join(", ")})`
-            : accessLabel,
-        ],
-        ["Vote credits", d.voteBudget],
-      ],
+      title: "Règles",
+      rows: [["Participants par projet", "5 à 6 (maximum 6)"]],
     },
   ];
   return (
@@ -1119,7 +1213,7 @@ function ReviewStep({ d, set, onEdit }: { d: Draft; set: SetFn; onEdit: (step: n
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold">{g.title}</p>
             <Button variant="ghost" size="xs" onClick={() => onEdit(g.step)}>
-              Edit
+              Modifier
             </Button>
           </div>
           <dl className="divide-y rounded-lg border text-sm">
@@ -1133,8 +1227,8 @@ function ReviewStep({ d, set, onEdit }: { d: Draft; set: SetFn; onEdit: (step: n
         </div>
       ))}
       <p className="text-muted-foreground text-xs">
-        A default four-criterion rubric (impact, execution, innovation, presentation) is added —
-        tune it on the Rubric page.
+        Les critères généraux d’évaluation Innovation Lab sont ajoutés automatiquement. Un
+        administrateur pourra les adapter avant le début des projets.
       </p>
       <FieldLabel htmlFor="publish">
         <Field orientation="horizontal">
@@ -1144,9 +1238,9 @@ function ReviewStep({ d, set, onEdit }: { d: Draft; set: SetFn; onEdit: (step: n
             onCheckedChange={(c) => set("publish", Boolean(c))}
           />
           <FieldContent>
-            <FieldTitle>Publish immediately</FieldTitle>
+            <FieldTitle>Publier immédiatement</FieldTitle>
             <FieldDescription>
-              Otherwise the event is created as a draft that only organizers can see.
+              Sinon, l’événement reste un brouillon visible uniquement par les coachs.
             </FieldDescription>
           </FieldContent>
         </Field>

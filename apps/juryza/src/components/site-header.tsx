@@ -17,26 +17,25 @@ import { cn } from "@juryza/ui/lib/utils";
 import { ThemeToggle } from "@juryza/ui/theme/theme-toggle";
 
 import { Logo } from "@/components/brand";
+import { LanguageToggle } from "@/components/language-toggle";
+import { useI18n } from "@/components/locale-provider";
 import { UserMenu } from "@/components/user-menu";
 import { useViewer } from "@/components/viewer";
-
-const LINKS = [
-  { href: "/events", label: "Events" },
-  { href: "/leaderboard", label: "Leaderboard" },
-  { href: "/#features", label: "Features" },
-  { href: "/#how-it-works", label: "How it works" },
-  { href: "/docs", label: "Docs" },
-];
 
 export function SiteHeader() {
   const viewer = useViewer();
   const pathname = usePathname();
+  const { t } = useI18n();
+  const links = [
+    { href: "/events", label: t("site.events") },
+    { href: "/#parcours", label: t("site.howItWorks") },
+  ];
   return (
     <header className="bg-background/80 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40 border-b backdrop-blur">
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-6 px-4 sm:px-6">
         <Logo />
         <nav className="hidden items-center gap-1 text-sm md:flex">
-          {LINKS.map((l) => (
+          {links.map((l) => (
             <Link
               key={l.href}
               href={l.href}
@@ -50,6 +49,7 @@ export function SiteHeader() {
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-2">
+          <LanguageToggle compact />
           <ThemeToggle />
           {viewer ? (
             <>
@@ -60,7 +60,7 @@ export function SiteHeader() {
                 nativeButton={false}
                 render={<Link href="/dashboard" />}
               >
-                <LayoutDashboard /> Dashboard
+                <LayoutDashboard /> {t("site.openDashboard")}
               </Button>
               <UserMenu viewer={viewer} />
             </>
@@ -72,17 +72,19 @@ export function SiteHeader() {
                 nativeButton={false}
                 render={<Link href="/login" />}
               >
-                Sign in
-              </Button>
-              <Button size="sm" nativeButton={false} render={<Link href="/signup" />}>
-                Get started
+                {t("site.signIn")}
               </Button>
             </div>
           )}
           <Sheet>
             <SheetTrigger
               render={
-                <Button size="icon" variant="ghost" className="md:hidden" aria-label="Open menu" />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="md:hidden"
+                  aria-label={t("site.menu")}
+                />
               }
             >
               <Menu />
@@ -94,7 +96,7 @@ export function SiteHeader() {
                 </SheetTitle>
               </SheetHeader>
               <nav className="flex flex-col gap-1 px-4">
-                {LINKS.map((l) => (
+                {links.map((l) => (
                   <Link
                     key={l.href}
                     href={l.href}
@@ -106,21 +108,12 @@ export function SiteHeader() {
                 <div className="mt-4 flex flex-col gap-2">
                   {viewer ? (
                     <Button nativeButton={false} render={<Link href="/dashboard" />}>
-                      Dashboard
+                      {t("site.openDashboard")}
                     </Button>
                   ) : (
-                    <>
-                      <Button nativeButton={false} render={<Link href="/signup" />}>
-                        Get started
-                      </Button>
-                      <Button
-                        variant="outline"
-                        nativeButton={false}
-                        render={<Link href="/login" />}
-                      >
-                        Sign in
-                      </Button>
-                    </>
+                    <Button nativeButton={false} render={<Link href="/login" />}>
+                      {t("site.signIn")}
+                    </Button>
                   )}
                 </div>
               </nav>

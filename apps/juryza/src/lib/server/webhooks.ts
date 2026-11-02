@@ -20,6 +20,7 @@ export const WEBHOOK_EVENTS = [
   "event.created",
   "event.updated",
   "team.created",
+  "team.join_requested",
   "team.joined",
   "project.submitted",
   "project.updated",

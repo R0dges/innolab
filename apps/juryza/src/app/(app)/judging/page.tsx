@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CalendarClock, CheckCircle2, Gavel, Lock, Shuffle } from "lucide-react";
+import { ArrowRight, CalendarClock, CheckCircle2, Gavel, Lock } from "lucide-react";
 
 import { Badge } from "@juryza/ui/components/ui/badge";
 import { Button } from "@juryza/ui/components/ui/button";
@@ -26,7 +26,7 @@ import { formatDateTime, relativeTime } from "@/lib/format";
 /**
  * Judging queue: every event whose panel the viewer sits on, with their own
  * review progress and the judging deadline, and a way into the scoring
- * console or pairwise mode.
+ * scoring console.
  */
 
 interface QueueEvent {
@@ -54,18 +54,18 @@ export default function JudgingPage() {
   return (
     <>
       <PageHeader
-        title="Judging queue"
-        description="Projects assigned to you, event by event. Your scores are private to you and the organizers."
+        title="Évaluations des projets"
+        description="Tous les coachs évaluent tous les projets. Vos notes restent privées jusqu’à la publication des résultats."
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Panels" value={isLoading ? "…" : events.length} icon={Gavel} />
-        <StatCard label="Assigned" value={isLoading ? "…" : assigned} />
-        <StatCard label="Reviewed" value={isLoading ? "…" : scored} icon={CheckCircle2} />
+        <StatCard label="Événements" value={isLoading ? "…" : events.length} icon={Gavel} />
+        <StatCard label="À évaluer" value={isLoading ? "…" : assigned} />
+        <StatCard label="Évalués" value={isLoading ? "…" : scored} icon={CheckCircle2} />
         <StatCard
-          label="To do"
+          label="Restants"
           value={isLoading ? "…" : assigned - scored}
-          hint={assigned ? `${Math.round((scored / assigned) * 100)}% done` : undefined}
+          hint={assigned ? `${Math.round((scored / assigned) * 100)} % terminé` : undefined}
         />
       </div>
 
@@ -77,7 +77,7 @@ export default function JudgingPage() {
       ) : error ? (
         <Empty className="border">
           <EmptyHeader>
-            <EmptyTitle>Couldn't load your queue</EmptyTitle>
+            <EmptyTitle>Impossible de charger les évaluations</EmptyTitle>
             <EmptyDescription>{error.message}</EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -87,9 +87,9 @@ export default function JudgingPage() {
             <EmptyMedia variant="icon">
               <Gavel />
             </EmptyMedia>
-            <EmptyTitle>You're not on a judging panel</EmptyTitle>
+            <EmptyTitle>Aucun projet à évaluer</EmptyTitle>
             <EmptyDescription>
-              When an organizer invites you to judge, the event shows up here with your assignments.
+              Les projets des événements Innovation Lab apparaîtront ici dès leur phase d’évaluation.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -110,11 +110,11 @@ export default function JudgingPage() {
                       <h3 className="truncate font-semibold">{e.name}</h3>
                       {locked ? (
                         <Badge variant="secondary">
-                          <Lock /> {e.resultsPublished ? "Results published" : "Judging closed"}
+                          <Lock /> {e.resultsPublished ? "Résultats publiés" : "Évaluations closes"}
                         </Badge>
                       ) : complete ? (
                         <Badge>
-                          <CheckCircle2 /> All reviewed
+                          <CheckCircle2 /> Tout est évalué
                         </Badge>
                       ) : null}
                     </div>
@@ -122,42 +122,34 @@ export default function JudgingPage() {
                       <Progress
                         value={pct}
                         className="flex-1"
-                        aria-label={`${done} of ${e.assigned} reviewed`}
+                        aria-label={`${done} sur ${e.assigned} évalués`}
                       />
                       <span className="text-muted-foreground shrink-0 text-sm tabular-nums">
-                        {done} of {e.assigned} reviewed
+                        {done} sur {e.assigned} évalués
                       </span>
                     </div>
                     <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
                       <CalendarClock className="size-3.5" />
                       {closes === null
-                        ? "No judging deadline set"
+                        ? "Aucune date de clôture définie"
                         : closes > now
-                          ? `Judging closes ${relativeTime(closes, now)} · ${formatDateTime(closes)}`
-                          : `Judging closed ${formatDateTime(closes)}`}
+                          ? `Clôture ${relativeTime(closes, now)} · ${formatDateTime(closes)}`
+                          : `Évaluations closes le ${formatDateTime(closes)}`}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      nativeButton={false}
-                      render={<Link href={`/judging/${e.slug}/pairwise`} />}
-                    >
-                      <Shuffle /> Pairwise mode
-                    </Button>
                     <Button
                       size="sm"
                       nativeButton={false}
                       render={<Link href={`/judging/${e.slug}`} />}
                     >
                       {e.assigned === 0
-                        ? "Open console"
+                        ? "Ouvrir"
                         : complete || locked
-                          ? "Review scores"
+                          ? "Consulter les notes"
                           : done === 0
-                            ? "Start reviewing"
-                            : "Continue reviewing"}
+                            ? "Commencer"
+                            : "Continuer"}
                       <ArrowRight />
                     </Button>
                   </div>

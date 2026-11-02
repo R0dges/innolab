@@ -3,8 +3,11 @@ import type { NextRequest } from "next/server";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db, event, project, registration, rubricCriterion, track } from "@/lib/db";
+import { DEFAULT_EVENT_LOCATION } from "@/lib/event-options";
 import { id } from "@/lib/ids";
+import { INTERNAL_INNOLAB_ONLY } from "@/lib/platform";
 import { docToText } from "@/lib/rich-text";
+import { DEFAULT_RUBRIC } from "@/lib/rubric";
 import { audit } from "@/lib/server/audit";
 import { badRequest, conflict, created, handle, readBody } from "@/lib/server/http";
 import { requireRole, resolveIdentity } from "@/lib/server/identity";
@@ -15,18 +18,23 @@ import { dispatch } from "@/lib/server/webhooks";
 /**
  * GET  /api/events — published events (plus the caller's own drafts), newest
  *      first, with project and participant counts.
- * POST /api/events — create an event (organizer). Starts as a draft unless
+ * POST /api/events — create an event (coach). Starts as a draft unless
  *      `visibility: "published"`; ships with a sensible default rubric.
  */
 
 export const GET = handle(async (req: NextRequest) => {
   const me = await resolveIdentity(req);
-  const visible =
+  const accessFilter =
     me?.role === "admin"
       ? undefined
       : me
         ? or(eq(event.visibility, "published"), eq(event.createdBy, me.userId))
         : eq(event.visibility, "published");
+  const visible = INTERNAL_INNOLAB_ONLY
+    ? accessFilter
+      ? and(eq(event.workflow, "innolab"), accessFilter)
+      : eq(event.workflow, "innolab")
+    : accessFilter;
 
   const rows = await db
     .select()
@@ -60,8 +68,11 @@ export const GET = handle(async (req: NextRequest) => {
 });
 
 export const POST = handle(async (req: NextRequest) => {
-  const me = await requireRole(req, "organizer");
+  const me = await requireRole(req, "judge");
   const b = await readBody(req, eventInput);
+  if (INTERNAL_INNOLAB_ONLY && b.workflow !== "innolab") {
+    throw badRequest("Cette plateforme accepte uniquement les événements Innovation Lab");
+  }
   const scheduleIssue = innolabScheduleIssue(b);
   if (scheduleIssue) throw badRequest(scheduleIssue);
 
@@ -83,10 +94,10 @@ export const POST = handle(async (req: NextRequest) => {
       content: b.content ?? null,
       rules: b.rules ?? null,
       mode: b.mode,
-      location: b.location ?? null,
+      location: b.mode === "online" ? null : b.location || DEFAULT_EVENT_LOCATION,
       hue: b.hue,
       visibility: b.visibility,
-      workflow: b.workflow,
+      workflow: "innolab",
       pitchSubmissionsOpen: toDate(b.pitchSubmissionsOpen),
       pitchSubmissionsClose: toDate(b.pitchSubmissionsClose),
       pitchVotingOpen: toDate(b.pitchVotingOpen),
@@ -96,7 +107,7 @@ export const POST = handle(async (req: NextRequest) => {
       judgingClose: toDate(b.judgingClose),
       votingOpen: toDate(b.votingOpen),
       votingClose: toDate(b.votingClose),
-      maxTeamSize: b.maxTeamSize,
+      maxTeamSize: INTERNAL_INNOLAB_ONLY ? 6 : b.maxTeamSize,
       reviewsPerProject: b.reviewsPerProject,
       votingAccess: b.votingAccess,
       votingEmailDomains: b.votingEmailDomains,
@@ -112,32 +123,12 @@ export const POST = handle(async (req: NextRequest) => {
         .values(b.tracks.map((name, position) => ({ id: id.track(), eventId, name, position })));
     }
     await tx.insert(rubricCriterion).values(
-      [
-        {
-          key: "impact",
-          label: "Impact",
-          weight: 0.3,
-          description: "Does it solve a real problem for real people?",
-        },
-        {
-          key: "execution",
-          label: "Execution",
-          weight: 0.35,
-          description: "Does it work? Is it well built?",
-        },
-        {
-          key: "innovation",
-          label: "Innovation",
-          weight: 0.2,
-          description: "Is the idea or approach new?",
-        },
-        {
-          key: "presentation",
-          label: "Presentation",
-          weight: 0.15,
-          description: "Is it clearly explained and demoed?",
-        },
-      ].map((c, position) => ({ ...c, id: id.criterion(), eventId, position }))
+      DEFAULT_RUBRIC.map((criterion, position) => ({
+        ...criterion,
+        id: id.criterion(),
+        eventId,
+        position,
+      }))
     );
   });
 

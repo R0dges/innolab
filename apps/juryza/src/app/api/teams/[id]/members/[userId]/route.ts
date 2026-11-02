@@ -9,10 +9,9 @@ import { requireUser } from "@/lib/server/identity";
 
 /**
  * DELETE /api/teams/:id/members/:userId — leave the team (yourself) or remove
- * a member (owner). When the owner leaves, ownership passes to the
- * longest-serving member; the last member leaving disbands the team. Rosters
- * lock at the submission deadline so a team cannot be reshuffled after judging
- * starts.
+ * a member (owner). In an Innolab event, the initial project owner remains
+ * responsible for the whole event and cannot leave or be removed. Legacy
+ * workflows keep their historical ownership-transfer behaviour.
  */
 export const DELETE = handle<{ id: string; userId: string }>(
   async (req, { id: teamId, userId }) => {
@@ -33,6 +32,11 @@ export const DELETE = handle<{ id: string; userId: string }>(
 
     const manager = canManage(me, e);
     const self = userId === me.userId;
+    if (e.workflow === "innolab" && target.role === "owner") {
+      throw forbidden(
+        "Le responsable initial reste responsable du projet pendant tout l’événement Innovation Lab"
+      );
+    }
     if (!self && mine?.role !== "owner" && !manager)
       throw forbidden("Only the team owner can remove members");
     if (!manager && !submissionsAreOpen(e))

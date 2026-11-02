@@ -1,32 +1,29 @@
 import {
   Award,
   BarChart3,
+  CalendarDays,
   CalendarPlus,
   ClipboardCheck,
   Compass,
   Database,
-  FileCode2,
+  FileSearch,
   FolderKanban,
   Gauge,
   Gavel,
-  KeyRound,
   LayoutDashboard,
   ListChecks,
   Megaphone,
-  PlugZap,
   ScrollText,
   Settings,
   ShieldCheck,
-  Shuffle,
   Tags,
   Trophy,
   UserRound,
   Users,
-  UsersRound,
-  Vote,
 } from "lucide-react";
 
 import type { Viewer } from "@/components/viewer";
+import type { TranslationKey } from "@/lib/i18n";
 import { hasAtLeast } from "@/lib/roles";
 
 /** Sidebar navigation, derived from the viewer's role and judging panels. */
@@ -42,101 +39,94 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-export function mainNav(viewer: Viewer): NavGroup[] {
+type Translator = (key: TranslationKey) => string;
+
+export function mainNav(viewer: Viewer, t: Translator): NavGroup[] {
   const groups: NavGroup[] = [
     {
-      label: "Overview",
+      label: t("nav.innovationLabs"),
       items: [
-        { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
-        { href: "/events", label: "Explore events", icon: Compass },
+        { href: "/dashboard", label: t("nav.dashboard"), icon: LayoutDashboard, exact: true },
+        { href: "/events", label: t("nav.innovationLabs"), icon: Compass },
       ],
     },
     {
-      label: "Participate",
-      items: [
-        { href: "/projects", label: "My projects", icon: FolderKanban },
-        { href: "/teams", label: "My teams", icon: UsersRound },
-      ],
+      label: t("nav.participate"),
+      items: [{ href: "/projects", label: t("nav.myProjects"), icon: FolderKanban }],
     },
   ];
   if (viewer.judgeEvents > 0 || viewer.role === "judge") {
     groups.push({
-      label: "Judge",
-      items: [{ href: "/judging", label: "Judging queue", icon: Gavel }],
+      label: t("nav.coach"),
+      items: [{ href: "/judging", label: t("nav.evaluations"), icon: Gavel }],
     });
   }
-  if (hasAtLeast(viewer.role, "organizer")) {
+  if (hasAtLeast(viewer.role, "judge")) {
     groups.push({
-      label: "Organize",
+      label: t("nav.organize"),
       items: [
-        { href: "/manage", label: "My events", icon: Gauge, exact: true },
-        { href: "/manage/new", label: "New event", icon: CalendarPlus },
+        { href: "/manage", label: t("nav.myEvents"), icon: Gauge, exact: true },
+        { href: "/manage/new", label: t("nav.newEvent"), icon: CalendarPlus },
       ],
     });
   }
   if (viewer.role === "admin") {
     groups.push({
-      label: "Admin",
-      items: [{ href: "/admin/users", label: "Users & roles", icon: ShieldCheck }],
+      label: t("nav.admin"),
+      items: [{ href: "/admin/users", label: t("nav.users"), icon: ShieldCheck }],
     });
   }
   groups.push({
-    label: "Account",
+    label: t("nav.account"),
     items: [
-      { href: "/settings/profile", label: "Profile", icon: UserRound },
-      { href: "/settings/account", label: "Account", icon: Settings },
-      { href: "/settings/tokens", label: "API tokens", icon: KeyRound },
+      { href: "/settings/profile", label: t("nav.profile"), icon: UserRound },
+      { href: "/settings/account", label: t("nav.account"), icon: Settings },
     ],
   });
   return groups;
 }
 
 /** The per-event console shown while inside /manage/<slug>. */
-export function manageNav(slug: string): NavGroup[] {
+export function manageNav(slug: string, t: Translator): NavGroup[] {
   const base = `/manage/${slug}`;
   return [
     {
-      label: "Event",
+      label: t("nav.event"),
       items: [
-        { href: base, label: "Overview", icon: BarChart3, exact: true },
-        { href: `${base}/settings`, label: "Details & dates", icon: Settings },
-        { href: `${base}/tracks`, label: "Tracks & prizes", icon: Tags },
-        { href: `${base}/announcements`, label: "Announcements", icon: Megaphone },
+        { href: base, label: t("nav.overview"), icon: BarChart3, exact: true },
+        { href: `${base}/settings`, label: t("nav.detailsDates"), icon: Settings },
+        { href: `${base}/tracks`, label: t("nav.tracksPrizes"), icon: Tags },
+        { href: `${base}/announcements`, label: t("nav.announcements"), icon: Megaphone },
+        { href: `${base}/workspace`, label: t("nav.auditResources"), icon: FileSearch },
+        { href: `${base}/schedule`, label: t("nav.calendar"), icon: CalendarDays },
       ],
     },
     {
-      label: "Submissions",
+      label: t("nav.participate"),
       items: [
-        { href: `${base}/participants`, label: "Participants & teams", icon: Users },
-        { href: `${base}/submissions`, label: "Projects", icon: FolderKanban },
+        { href: `${base}/participants`, label: t("nav.participantsProjects"), icon: Users },
+        { href: `${base}/submissions`, label: t("nav.projects"), icon: FolderKanban },
       ],
     },
     {
-      label: "Judging",
+      label: t("nav.projectEvaluation"),
       items: [
-        { href: `${base}/rubric`, label: "Rubric", icon: ListChecks },
-        { href: `${base}/judges`, label: "Judges", icon: Gavel },
-        { href: `${base}/assignments`, label: "Assignments", icon: Shuffle },
-        { href: `${base}/results`, label: "Results", icon: Trophy },
+        { href: `${base}/rubric`, label: t("nav.criteria"), icon: ListChecks },
+        { href: `${base}/judges`, label: t("nav.coaches"), icon: Gavel },
+        { href: `${base}/results`, label: t("nav.results"), icon: Trophy },
       ],
     },
     {
-      label: "Community",
-      items: [{ href: `${base}/voting`, label: "Voting & integrity", icon: Vote }],
-    },
-    {
-      label: "Operations",
+      label: t("nav.operations"),
       items: [
-        { href: `${base}/certificates`, label: "Certificates", icon: Award },
-        { href: `${base}/integrations`, label: "Webhooks & embed", icon: PlugZap },
-        { href: `${base}/data`, label: "Import & export", icon: Database },
-        { href: `${base}/audit`, label: "Audit log", icon: ScrollText },
+        { href: `${base}/certificates`, label: t("nav.certificates"), icon: Award },
+        { href: `${base}/data`, label: t("nav.importExport"), icon: Database },
+        { href: `${base}/audit`, label: t("nav.auditLog"), icon: ScrollText },
       ],
     },
   ];
 }
 
-export const extraCommands: NavItem[] = [
-  { href: "/docs/api", label: "API reference", icon: FileCode2 },
-  { href: "/certificates", label: "Verify a certificate", icon: ClipboardCheck },
-];
+export function extraCommands(t: Translator): NavItem[] {
+  return [{ href: "/certificates", label: t("nav.certificates"), icon: ClipboardCheck }];
+}

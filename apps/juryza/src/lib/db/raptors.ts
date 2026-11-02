@@ -446,6 +446,7 @@ export function raptorsBundles(): Bundle[] {
           judge: j.id,
           project: `${eslug}_prj_${pi + 1}`,
           criteria: { impact: mark(0), execution: mark(0.15), originality: mark(-0.15) },
+          favorite: false,
           comment: "Showcase review (reconstructed to match the published result).",
         });
       });

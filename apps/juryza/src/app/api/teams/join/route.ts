@@ -3,13 +3,14 @@ import type { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { db, team, teamMember } from "@/lib/db";
+import { db, team } from "@/lib/db";
+import { isInnolab } from "@/lib/innolab";
 import { submissionsAreOpen } from "@/lib/phase";
 import { audit } from "@/lib/server/audit";
-import { findEvent, register, teamOf } from "@/lib/server/events";
-import { conflict, forbidden, handle, notFound, readBody } from "@/lib/server/http";
+import { findEvent } from "@/lib/server/events";
+import { handle, notFound, readBody } from "@/lib/server/http";
 import { requireUser, resolveIdentity } from "@/lib/server/identity";
-import { memberCount, teamMembers } from "@/lib/server/teams";
+import { joinTeam, teamMembers } from "@/lib/server/teams";
 import { dispatch } from "@/lib/server/webhooks";
 
 /**
@@ -24,6 +25,9 @@ async function byToken(token: string) {
   if (!t) throw notFound("This invite link is invalid or has been reset");
   const e = await findEvent(t.eventId);
   if (!e) throw notFound("This invite link is invalid or has been reset");
+  if (isInnolab(e)) {
+    throw notFound("Innolab project membership requires an approved join request");
+  }
   return { t, e };
 }
 
@@ -45,19 +49,12 @@ export const POST = handle(async (req: NextRequest) => {
   const me = await requireUser(req);
   const { token } = await readBody(req, z.object({ token: z.string().min(1) }));
   const { t, e } = await byToken(token);
+  const joined = await joinTeam(t.id, me.userId, { registerUser: true });
 
-  const current = await teamOf(e.id, me.userId);
-  if (current?.id === t.id) return { teamId: t.id, eventSlug: e.slug, alreadyMember: true };
-  if (current)
-    throw conflict(`You are already on "${current.name}" for this event — leave it first`);
-  if (!submissionsAreOpen(e)) throw forbidden("Team formation is closed for this event");
-  if ((await memberCount(t.id)) >= e.maxTeamSize) throw forbidden("This team is full");
+  if (joined.alreadyMember) {
+    return { teamId: t.id, eventSlug: e.slug, alreadyMember: true };
+  }
 
-  await db
-    .insert(teamMember)
-    .values({ teamId: t.id, userId: me.userId, role: "member" })
-    .onConflictDoNothing();
-  await register(e.id, me.userId);
   await audit({ eventId: e.id, actor: me, action: "team.joined", target: t.id, req });
   dispatch("team.joined", { teamId: t.id, userId: me.userId }, e.id);
   return { teamId: t.id, eventSlug: e.slug, alreadyMember: false };

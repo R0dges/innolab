@@ -2,6 +2,8 @@ import Link from "next/link";
 
 import { cn } from "@juryza/ui/lib/utils";
 
+import { PRODUCT_NAME } from "@/lib/platform";
+
 /** The Juryza mark: the gavel and verification checkmark mark in a rounded square. */
 export function LogoMark({ className }: { className?: string }) {
   return (
@@ -19,7 +21,7 @@ export function LogoMark({ className }: { className?: string }) {
         className="size-full"
         aria-hidden="true"
       >
-        <title>Juryza</title>
+        <title>{PRODUCT_NAME}</title>
         <defs>
           <linearGradient
             id="juryzaBgGrad"
@@ -142,7 +144,7 @@ export function Logo({ href = "/", className }: { href?: string; className?: str
       className={cn("flex items-center gap-2.5 font-semibold tracking-tight", className)}
     >
       <LogoMark />
-      <span className="text-[1.05rem] font-bold tracking-tight">Juryza</span>
+      <span className="text-[1.05rem] font-bold tracking-tight">{PRODUCT_NAME}</span>
     </Link>
   );
 }

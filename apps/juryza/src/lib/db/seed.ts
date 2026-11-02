@@ -13,12 +13,12 @@
  *     Community voting is open, so the T3 flow is live on first boot.
  *  3. A sandbox event with submissions open, so an evaluator can walk the whole
  *     lifecycle (team → project → judging → results) without editing dates.
- *  4. API tokens for the four checker roles, written to `.dogfood.toml`.
+ *  4. API tokens for the checker roles and auxiliary participants, written to `.dogfood.toml`.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { eq, inArray, like, sql } from "drizzle-orm";
+import { eq, inArray, like, or, sql } from "drizzle-orm";
 
 import {
   apiToken,
@@ -96,6 +96,41 @@ async function createUser(o: {
   return res.user.id;
 }
 
+async function ensureFreeParticipant() {
+  const email = "participant.free@juryza.test";
+  const [existing] = await db
+    .select({ id: userTable.id })
+    .from(userTable)
+    .where(eq(userTable.email, email))
+    .limit(1);
+  const userId =
+    existing?.id ??
+    (await createUser({
+      email,
+      name: "Fran Participant libre",
+      password: "participant-free-password-123",
+      role: "participant",
+      username: "participant_free",
+      headline: "Disponible pour rejoindre un projet",
+    }));
+
+  await db
+    .update(userTable)
+    .set({ lookingForTeam: true, headline: "Disponible pour rejoindre un projet" })
+    .where(eq(userTable.id, userId));
+  const innolabDemos = await db
+    .select({ id: event.id })
+    .from(event)
+    .where(like(event.slug, "demo-innolab-%"));
+  if (innolabDemos.length > 0) {
+    await db
+      .insert(registration)
+      .values(innolabDemos.map((demo) => ({ eventId: demo.id, userId })))
+      .onConflictDoNothing();
+  }
+  return userId;
+}
+
 async function mintToken(userId: string, label: string) {
   const token = `jz_${secretToken(40)}`;
   await db.insert(apiToken).values({
@@ -144,6 +179,7 @@ async function main() {
       .where(eq(userTable.email, "organizer@juryza.test"))
       .limit(1);
     if (existing) {
+      await ensureFreeParticipant();
       console.info("[seed] data already present; keeping it (set SEED_RESET=1 to reseed)");
       await writeCheckerConfig();
       return;
@@ -199,6 +235,7 @@ async function main() {
       lookingForTeam: true,
     })
     .where(eq(userTable.id, participantId));
+  await ensureFreeParticipant();
 
   // ---- 2. The fixture event --------------------------------------------
   const fx = loadFixtures();
@@ -352,6 +389,7 @@ async function main() {
     ),
     mode: "hybrid",
     location: "Online + Berlin",
+    workflow: "standard",
     hue: 160,
     visibility: "published",
     isFixture: true,
@@ -548,13 +586,29 @@ async function main() {
  */
 async function writeCheckerConfig() {
   const accounts = await db
-    .select({ id: userTable.id, username: userTable.username })
+    .select({ id: userTable.id, username: userTable.username, email: userTable.email })
     .from(userTable)
-    .where(inArray(userTable.username, ["organizer", "judge_a", "judge_b", "participant"]));
+    .where(
+      or(
+        inArray(userTable.username, ["organizer", "judge_a", "judge_b", "participant"]),
+        inArray(userTable.email, [
+          "member1_1@example.org",
+          "member1_2@example.org",
+          "lena2@example.org",
+          "member2_1@example.org",
+          "sofia3@example.org",
+        ])
+      )
+    );
   const idOf = (username: string) => {
     const found = accounts.find((a) => a.username === username);
     if (!found)
       throw new Error(`checker account "${username}" is missing — reseed with SEED_RESET=1`);
+    return found.id;
+  };
+  const idOfEmail = (email: string) => {
+    const found = accounts.find((account) => account.email === email);
+    if (!found) throw new Error(`checker account "${email}" is missing — reseed with SEED_RESET=1`);
     return found.id;
   };
   await db.delete(apiToken).where(like(apiToken.label, "acceptance: %"));
@@ -563,6 +617,11 @@ async function writeCheckerConfig() {
     judge_a: await mintToken(idOf("judge_a"), "acceptance: judge_a"),
     judge_b: await mintToken(idOf("judge_b"), "acceptance: judge_b"),
     participant: await mintToken(idOf("participant"), "acceptance: participant"),
+    participant_2: await mintToken(idOfEmail("member1_1@example.org"), "acceptance: participant_2"),
+    participant_3: await mintToken(idOfEmail("member1_2@example.org"), "acceptance: participant_3"),
+    participant_4: await mintToken(idOfEmail("lena2@example.org"), "acceptance: participant_4"),
+    participant_5: await mintToken(idOfEmail("member2_1@example.org"), "acceptance: participant_5"),
+    participant_6: await mintToken(idOfEmail("sofia3@example.org"), "acceptance: participant_6"),
   };
 
   const baseUrl = process.env.PORTAL_BASE_URL ?? "http://localhost:8080";
@@ -581,6 +640,11 @@ organizer   = "Authorization: Bearer ${tokens.organizer}"
 judge_a     = "Authorization: Bearer ${tokens.judge_a}"
 judge_b     = "Authorization: Bearer ${tokens.judge_b}"
 participant = "Authorization: Bearer ${tokens.participant}"
+participant_2 = "Authorization: Bearer ${tokens.participant_2}"
+participant_3 = "Authorization: Bearer ${tokens.participant_3}"
+participant_4 = "Authorization: Bearer ${tokens.participant_4}"
+participant_5 = "Authorization: Bearer ${tokens.participant_5}"
+participant_6 = "Authorization: Bearer ${tokens.participant_6}"
 
 [routes]
 gallery      = "/api/events/sample-hack-2026/projects"
@@ -607,6 +671,9 @@ csv_export   = "/api/events/sample-hack-2026/export?dataset=results"
   console.info("  judge A      judge.a@juryza.test      judge-a-password-123");
   console.info("  judge B      judge.b@juryza.test      judge-b-password-123");
   console.info("  participant  participant@juryza.test  participant-password-123");
+  console.info(
+    "  participant libre  participant.free@juryza.test  participant-free-password-123"
+  );
   console.info(
     "  Sanjay Sah   sanjaysah101@raptors.community  member-password-123 (GitHub: sanjaysah101)"
   );

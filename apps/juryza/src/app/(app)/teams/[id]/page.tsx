@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Check,
+  CheckCircle2,
   Copy,
   Crown,
   FolderKanban,
@@ -17,6 +18,7 @@ import {
   RefreshCw,
   UserMinus,
   UsersRound,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -67,7 +69,7 @@ import { EventCover } from "@/components/event-bits";
 import { UserAvatar } from "@/components/user-avatar";
 import { useViewer } from "@/components/viewer";
 import { api } from "@/lib/api";
-import { formatDate, hueOf, pluralize, relativeTime } from "@/lib/format";
+import { formatDate, hueOf, relativeTime } from "@/lib/format";
 
 /**
  * A team's home: name and pitch (editable by the owner), the roster with
@@ -84,7 +86,14 @@ interface TeamData {
     createdAt: string;
     inviteUrl?: string;
   };
-  event: { id: string; slug: string; name: string; maxTeamSize: number; submissionsClose: string };
+  event: {
+    id: string;
+    slug: string;
+    name: string;
+    maxTeamSize: number;
+    submissionsClose: string;
+    workflow: string;
+  };
   members: {
     id: string;
     name: string;
@@ -95,7 +104,26 @@ interface TeamData {
     joinedAt: string;
   }[];
   project: { id: string; title: string; status: string } | null;
-  viewer: { role: string | null; canManage: boolean; open: boolean };
+  viewer: {
+    role: string | null;
+    canManage: boolean;
+    canReviewRequests: boolean;
+    open: boolean;
+  };
+}
+
+interface JoinRequest {
+  id: string;
+  status: string;
+  createdAt: string;
+  participant: {
+    id: string;
+    name: string;
+    email: string;
+    username: string | null;
+    image: string | null;
+    headline: string | null;
+  };
 }
 
 export default function TeamPage() {
@@ -108,6 +136,11 @@ export default function TeamPage() {
     queryKey: key,
     queryFn: () => api.get<TeamData>(`/api/teams/${id}`),
   });
+  const requests = useQuery({
+    queryKey: ["team", id, "join-requests"],
+    queryFn: () => api.get<{ requests: JoinRequest[] }>(`/api/teams/${id}/join`),
+    enabled: data?.viewer.canReviewRequests ?? false,
+  });
 
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
@@ -116,6 +149,7 @@ export default function TeamPage() {
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: key });
+    void queryClient.invalidateQueries({ queryKey: ["team", id, "join-requests"] });
     void queryClient.invalidateQueries({ queryKey: ["me", "overview"] });
     if (data) void queryClient.invalidateQueries({ queryKey: ["event", data.event.slug] });
   };
@@ -136,7 +170,7 @@ export default function TeamPage() {
   const resetInvite = useMutation({
     mutationFn: () => api.post<{ inviteUrl: string }>(`/api/teams/${id}/invite`),
     onSuccess: () => {
-      toast.success("Invite link reset", { description: "The old link no longer works." });
+      toast.success("Lien d’invitation réinitialisé", { description: "L’ancien lien ne fonctionne plus." });
       refresh();
     },
     onError: (e) => toast.error(e.message),
@@ -147,13 +181,26 @@ export default function TeamPage() {
       api.delete<{ ok: true; disbanded: boolean }>(`/api/teams/${id}/members/${userId}`),
     onSuccess: (res, userId) => {
       if (userId === me?.userId || res.disbanded) {
-        toast.success(res.disbanded ? "Team disbanded" : "You left the team");
+        toast.success(res.disbanded ? "Groupe supprimé" : "Vous avez quitté le projet");
         void queryClient.invalidateQueries({ queryKey: ["me", "overview"] });
-        router.push("/teams");
+        router.push("/projects");
       } else {
-        toast.success("Member removed");
+        toast.success("Participant retiré");
         refresh();
       }
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const reviewRequest = useMutation({
+    mutationFn: ({ requestId, decision }: { requestId: string; decision: "approve" | "reject" }) =>
+      api.patch<{ status: "approved" | "rejected" }>(`/api/teams/${id}/join`, {
+        requestId,
+        decision,
+      }),
+    onSuccess: ({ status }) => {
+      toast.success(status === "approved" ? "Participant ajouté" : "Demande refusée");
+      refresh();
     },
     onError: (e) => toast.error(e.message),
   });
@@ -161,9 +208,9 @@ export default function TeamPage() {
   const disband = useMutation({
     mutationFn: () => api.delete(`/api/teams/${id}`),
     onSuccess: () => {
-      toast.success("Team disbanded");
+      toast.success("Groupe supprimé");
       void queryClient.invalidateQueries({ queryKey: ["me", "overview"] });
-      router.push("/teams");
+      router.push("/projects");
     },
     onError: (e) => toast.error(e.message),
   });
@@ -198,12 +245,12 @@ export default function TeamPage() {
           <EmptyMedia variant="icon">
             <UsersRound />
           </EmptyMedia>
-          <EmptyTitle>Team not found</EmptyTitle>
-          <EmptyDescription>{error?.message ?? "It may have been disbanded."}</EmptyDescription>
+          <EmptyTitle>Projet introuvable</EmptyTitle>
+          <EmptyDescription>{error?.message ?? "Il a peut-être été supprimé."}</EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
-          <Button variant="outline" nativeButton={false} render={<Link href="/teams" />}>
-            <ArrowLeft /> My teams
+          <Button variant="outline" nativeButton={false} render={<Link href="/projects" />}>
+            <ArrowLeft /> Mes projets
           </Button>
         </EmptyContent>
       </Empty>
@@ -212,6 +259,7 @@ export default function TeamPage() {
 
   const { team, event, members, project, viewer } = data;
   const owner = viewer.role === "owner" || viewer.canManage;
+  const canReviewRequests = viewer.canReviewRequests;
   const member = viewer.role !== null;
   const seatsLeft = Math.max(0, event.maxTeamSize - members.length);
   const locked = !viewer.open;
@@ -239,7 +287,7 @@ export default function TeamPage() {
               }}
             >
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="team-name">Team name</Label>
+                <Label htmlFor="team-name">Nom du projet</Label>
                 <Input
                   id="team-name"
                   value={name}
@@ -250,7 +298,7 @@ export default function TeamPage() {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="team-desc">What you're building / who you're looking for</Label>
+                <Label htmlFor="team-desc">Description du projet et profils recherchés</Label>
                 <Textarea
                   id="team-desc"
                   value={description}
@@ -265,10 +313,10 @@ export default function TeamPage() {
                   size="sm"
                   disabled={patch.isPending || name.trim().length < 2}
                 >
-                  {patch.isPending && <Spinner />} Save
+                  {patch.isPending && <Spinner />} Enregistrer
                 </Button>
                 <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
-                  Cancel
+                  Annuler
                 </Button>
               </div>
             </form>
@@ -284,15 +332,15 @@ export default function TeamPage() {
               <p className="text-muted-foreground max-w-2xl text-sm text-pretty">
                 {team.description ||
                   (owner
-                    ? "Add a short description so people know what you're building."
-                    : "No description.")}
+                    ? "Ajoutez une courte description du projet."
+                    : "Aucune description.")}
               </p>
             </div>
           )}
           {!editing && (
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               {team.lookingForMembers && seatsLeft > 0 && (
-                <Badge variant="secondary">Looking for members</Badge>
+                <Badge variant="secondary">Inscriptions ouvertes</Badge>
               )}
               {owner && (
                 <Button
@@ -304,7 +352,7 @@ export default function TeamPage() {
                     setEditing(true);
                   }}
                 >
-                  <PencilLine /> Edit
+                  <PencilLine /> Modifier
                 </Button>
               )}
             </div>
@@ -315,10 +363,10 @@ export default function TeamPage() {
       {locked && (
         <Alert>
           <UsersRound />
-          <AlertTitle>Roster locked</AlertTitle>
+          <AlertTitle>Composition du groupe verrouillée</AlertTitle>
           <AlertDescription>
-            The submission deadline passed {relativeTime(event.submissionsClose)}, so members can no
-            longer join, leave or be removed.
+            Le projet est terminé depuis {relativeTime(event.submissionsClose)}. Les participants ne
+            peuvent plus rejoindre ou quitter le groupe.
           </AlertDescription>
         </Alert>
       )}
@@ -327,16 +375,16 @@ export default function TeamPage() {
         <div className="flex flex-col gap-6">
           <Card>
             <CardHeader>
-              <CardTitle>Members</CardTitle>
+              <CardTitle>Participants</CardTitle>
               <CardDescription>
-                {pluralize(members.length, "member")} of {event.maxTeamSize} ·{" "}
-                {seatsLeft ? `${pluralize(seatsLeft, "seat")} left` : "Team is full"}
+                {members.length} sur {event.maxTeamSize} ·{" "}
+                {seatsLeft ? `${seatsLeft} place(s) disponible(s)` : "Groupe complet"}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               <Progress
                 value={(members.length / event.maxTeamSize) * 100}
-                aria-label="Seats filled"
+                aria-label="Places occupées"
               />
               <ul className="-mx-2 flex flex-col">
                 {members.map((m) => {
@@ -356,34 +404,40 @@ export default function TeamPage() {
                           ) : (
                             m.name
                           )}
-                          {self && <span className="text-muted-foreground font-normal">(you)</span>}
+                          {self && <span className="text-muted-foreground font-normal">(vous)</span>}
                           {m.role === "owner" && (
                             <Crown
                               className="text-warning size-3.5 shrink-0"
-                              aria-label="Team owner"
+                              aria-label="Responsable du projet"
                             />
                           )}
                         </p>
                         <p className="text-muted-foreground truncate text-xs">
-                          {m.headline || (m.role === "owner" ? "Owner" : "Member")} · joined{" "}
+                          {m.headline || (m.role === "owner" ? "Responsable" : "Participant")} · rejoint le{" "}
                           {formatDate(m.joinedAt)}
                         </p>
                       </div>
-                      {!locked && (self || owner) && (
+                      {!locked &&
+                        (self || owner) &&
+                        !(event.workflow === "innolab" && m.role === "owner") && (
                         <ConfirmButton
-                          label={self ? "Leave" : "Remove"}
+                          label={self ? "Quitter" : "Retirer"}
                           icon={self ? LogOut : UserMinus}
-                          title={self ? "Leave this team?" : `Remove ${m.name}?`}
+                          title={self ? "Quitter ce projet ?" : `Retirer ${m.name} ?`}
                           description={
                             self
                               ? members.length === 1
                                 ? "You're the last member, so the team will be disbanded."
                                 : m.role === "owner"
                                   ? "Ownership passes to the longest-serving member."
-                                  : "You can rejoin later with an invite link while submissions are open."
-                              : "They lose access to the team's draft project. They can rejoin with the invite link."
+                                  : event.workflow === "innolab"
+                                    ? "Vous devrez envoyer une nouvelle demande pour revenir."
+                                    : "You can rejoin later with an invite link while submissions are open."
+                              : event.workflow === "innolab"
+                                ? "Cette personne perdra l’accès au projet et devra envoyer une nouvelle demande approuvée pour revenir."
+                                : "They lose access to the team's draft project. They can rejoin with the invite link."
                           }
-                          confirm={self ? "Leave team" : "Remove"}
+                          confirm={self ? "Quitter le projet" : "Retirer"}
                           pending={removeMember.isPending && removeMember.variables === m.id}
                           onConfirm={() => removeMember.mutate(m.id)}
                         />
@@ -394,6 +448,74 @@ export default function TeamPage() {
               </ul>
             </CardContent>
           </Card>
+
+          {canReviewRequests && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Demandes d’inscription</CardTitle>
+                <CardDescription>
+                  Le responsable du projet et les coachs peuvent accepter ou refuser les participants.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {requests.isLoading ? (
+                  <Skeleton className="h-20 rounded-lg" />
+                ) : requests.data?.requests.length ? (
+                  <ul className="flex flex-col gap-2">
+                    {requests.data.requests.map((request) => {
+                      const reviewing =
+                        reviewRequest.isPending &&
+                        reviewRequest.variables?.requestId === request.id;
+                      return (
+                        <li
+                          key={request.id}
+                          className="flex flex-wrap items-center gap-3 rounded-lg border p-3"
+                        >
+                          <UserAvatar
+                            name={request.participant.name}
+                            image={request.participant.image}
+                            className="size-9"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium">
+                              {request.participant.name}
+                            </p>
+                            <p className="text-muted-foreground truncate text-xs">
+                              {request.participant.headline || request.participant.email} · demande du{" "}
+                              {formatDate(request.createdAt)}
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() =>
+                                reviewRequest.mutate({ requestId: request.id, decision: "approve" })
+                              }
+                              disabled={reviewRequest.isPending}
+                            >
+                              {reviewing ? <Spinner /> : <CheckCircle2 />} Accepter
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                reviewRequest.mutate({ requestId: request.id, decision: "reject" })
+                              }
+                              disabled={reviewRequest.isPending}
+                            >
+                              <X /> Refuser
+                            </Button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="text-muted-foreground text-sm">Aucune demande en attente.</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {member && team.inviteUrl && (
             <Card>
@@ -445,7 +567,7 @@ export default function TeamPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <FolderKanban className="size-4" /> Project
+                  <FolderKanban className="size-4" /> Projet
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -466,7 +588,7 @@ export default function TeamPage() {
                       nativeButton={false}
                       render={<Link href={`/projects/${project.id}`} />}
                     >
-                      <PencilLine /> {viewer.open ? "Open editor" : "View project"}
+                      <PencilLine /> {viewer.open ? "Ouvrir l’éditeur" : "Voir le projet"}
                     </Button>
                   ) : (
                     <Button
@@ -475,11 +597,11 @@ export default function TeamPage() {
                       nativeButton={false}
                       render={<Link href={`/e/${event.slug}/projects/${project.id}`} />}
                     >
-                      View project
+                      Voir le projet
                     </Button>
                   )}
                 </>
-              ) : member && viewer.open ? (
+              ) : member && viewer.open && event.workflow !== "innolab" ? (
                 <>
                   <p className="text-muted-foreground text-sm">
                     No project yet. Start one and write it up together.
@@ -494,19 +616,19 @@ export default function TeamPage() {
                 </>
               ) : (
                 <p className="text-muted-foreground text-sm">
-                  This team hasn't submitted a project.
+                  Le projet associé à ce pitch n’est pas encore disponible.
                 </p>
               )}
             </CardContent>
           </Card>
 
-          {owner && (
+          {canReviewRequests && (
             <Card>
               <CardContent className="flex items-center justify-between gap-4">
                 <div className="flex flex-col gap-0.5">
-                  <Label htmlFor="looking">Looking for members</Label>
+                  <Label htmlFor="looking">Inscriptions ouvertes</Label>
                   <p className="text-muted-foreground text-xs">
-                    Show the team as open on the event's team list.
+                    Autoriser les participants inscrits à envoyer une demande.
                   </p>
                 </div>
                 <Switch
@@ -519,24 +641,24 @@ export default function TeamPage() {
             </Card>
           )}
 
-          {owner && (
+          {owner && (event.workflow !== "innolab" || viewer.canManage) && (
             <Card className="border-destructive/40">
               <CardHeader>
-                <CardTitle className="text-destructive">Danger zone</CardTitle>
+                <CardTitle className="text-destructive">Zone sensible</CardTitle>
                 <CardDescription>
                   {project
-                    ? "Delete the team's project first — a team with a project can't be disbanded."
-                    : "Disbanding removes the team and its invite link for everyone."}
+                    ? "Le projet doit être supprimé avant son groupe."
+                    : "La suppression retire tous les participants de ce groupe."}
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <ConfirmButton
-                  label="Disband team"
+                  label="Supprimer le groupe"
                   icon={UsersRound}
                   variant="destructive"
-                  title={`Disband ${team.name}?`}
-                  description="Every member is removed and the invite link stops working. This can't be undone."
-                  confirm="Disband team"
+                  title={`Supprimer ${team.name} ?`}
+                  description="Tous les participants seront retirés. Cette action est irréversible."
+                  confirm="Supprimer le groupe"
                   disabled={(!!project || locked) && !viewer.canManage}
                   pending={disband.isPending}
                   onConfirm={() => disband.mutate()}

@@ -41,6 +41,7 @@ export function submissionsAreOpen(e: EventDates, now = Date.now()): boolean {
 
 /** Voting needs an explicit window; an event without one has no community vote. */
 export function votingIsOpen(e: EventDates, now = Date.now()): boolean {
+  if (e.workflow === "innolab") return false;
   const open = t(e.votingOpen);
   const close = t(e.votingClose);
   if (open === null && close === null) return false;
@@ -48,6 +49,7 @@ export function votingIsOpen(e: EventDates, now = Date.now()): boolean {
 }
 
 export function hasVoting(e: EventDates): boolean {
+  if (e.workflow === "innolab") return false;
   return t(e.votingOpen) !== null || t(e.votingClose) !== null;
 }
 
@@ -119,12 +121,20 @@ export function milestones(e: EventDates) {
       label: "Judging closes",
       at: e.judgingClose ? new Date(e.judgingClose) : null,
     },
-    { key: "voteOpen", label: "Voting opens", at: e.votingOpen ? new Date(e.votingOpen) : null },
-    {
-      key: "voteClose",
-      label: "Voting closes",
-      at: e.votingClose ? new Date(e.votingClose) : null,
-    },
+    ...(e.workflow === "innolab"
+      ? []
+      : [
+          {
+            key: "voteOpen",
+            label: "Voting opens",
+            at: e.votingOpen ? new Date(e.votingOpen) : null,
+          },
+          {
+            key: "voteClose",
+            label: "Voting closes",
+            at: e.votingClose ? new Date(e.votingClose) : null,
+          },
+        ]),
   ];
   return list
     .filter((m): m is { key: string; label: string; at: Date } => m.at !== null)

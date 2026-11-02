@@ -66,6 +66,12 @@ describe("votingIsOpen", () => {
     expect(votingIsOpen({ ...event, votingClose: null }, T0 + 1000 * HOUR)).toBe(true);
     expect(hasVoting({ ...event, votingOpen: null })).toBe(true);
   });
+
+  test("disables community project voting for the Innolab journey", () => {
+    const innolab = { ...event, workflow: "innolab" };
+    expect(hasVoting(innolab)).toBe(false);
+    expect(votingIsOpen(innolab, T0 + 60 * HOUR)).toBe(false);
+  });
 });
 
 describe("phaseOf", () => {
@@ -93,5 +99,17 @@ describe("milestones", () => {
       "close",
       "voteClose",
     ]);
+  });
+
+  test("omits community voting milestones for Innolab", () => {
+    const keys = milestones({
+      ...event,
+      workflow: "innolab",
+      pitchVotingOpen: at(10),
+      pitchVotingClose: at(11),
+    }).map((milestone) => milestone.key);
+    expect(keys).toContain("pitchVoteOpen");
+    expect(keys).not.toContain("voteOpen");
+    expect(keys).not.toContain("voteClose");
   });
 });

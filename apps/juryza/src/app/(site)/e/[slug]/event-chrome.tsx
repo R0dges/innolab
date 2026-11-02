@@ -17,8 +17,8 @@ import { Skeleton } from "@juryza/ui/components/ui/skeleton";
 import { cn } from "@juryza/ui/lib/utils";
 
 import { EventCover, NextMilestone, PhaseBadge } from "@/components/event-bits";
+import { useI18n } from "@/components/locale-provider";
 import { formatRange } from "@/lib/format";
-import { hasVoting } from "@/lib/phase";
 import { useEvent } from "@/lib/queries";
 
 /**
@@ -28,17 +28,18 @@ import { useEvent } from "@/lib/queries";
 export function EventChrome({ slug, children }: { slug: string; children: React.ReactNode }) {
   const { data, isLoading, error } = useEvent(slug);
   const pathname = usePathname();
+  const { t } = useI18n();
 
   if (error) {
     return (
       <Empty className="my-24">
         <EmptyHeader>
-          <EmptyTitle>Event not found</EmptyTitle>
-          <EmptyDescription>It may have been removed, or it is not published yet.</EmptyDescription>
+          <EmptyTitle>{t("event.notFound")}</EmptyTitle>
+          <EmptyDescription>{t("event.notFoundHint")}</EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
           <Button nativeButton={false} render={<Link href="/events" />}>
-            Browse events
+            {t("event.browse")}
           </Button>
         </EmptyContent>
       </Empty>
@@ -48,12 +49,10 @@ export function EventChrome({ slug, children }: { slug: string; children: React.
   const e = data?.event;
   const base = `/e/${slug}`;
   const tabs = [
-    { href: base, label: "Overview", exact: true },
-    ...(e?.workflow === "innolab" ? [{ href: `${base}/pitches`, label: "Ideas" }] : []),
-    { href: `${base}/projects`, label: "Projects" },
-    { href: `${base}/teams`, label: "Teams" },
-    ...(e && hasVoting(e) ? [{ href: `${base}/vote`, label: "Vote" }] : []),
-    { href: `${base}/leaderboard`, label: "Leaderboard" },
+    { href: base, label: t("event.overview"), exact: true },
+    { href: `${base}/pitches`, label: t("event.ideas") },
+    { href: `${base}/projects`, label: t("event.projects") },
+    { href: `${base}/leaderboard`, label: t("event.results") },
   ];
 
   return (
@@ -86,8 +85,9 @@ export function EventChrome({ slug, children }: { slug: string; children: React.
                   <MapPin className="size-4" /> {e.location ? `${e.mode} · ${e.location}` : e.mode}
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <Users className="size-4" /> {data.counts.participants} participants ·{" "}
-                  {data.counts.projects} projects
+                  <Users className="size-4" /> {data.counts.participants}{" "}
+                  {t("event.participants")} · {data.counts.projects}{" "}
+                  {t("event.projects").toLowerCase()}
                 </span>
               </div>
               {data.viewer?.canManage && (
@@ -98,7 +98,7 @@ export function EventChrome({ slug, children }: { slug: string; children: React.
                   nativeButton={false}
                   render={<Link href={`/manage/${slug}`} />}
                 >
-                  <Settings2 /> Manage event
+                  <Settings2 /> {t("event.manage")}
                 </Button>
               )}
             </>
@@ -108,7 +108,7 @@ export function EventChrome({ slug, children }: { slug: string; children: React.
       <div className="bg-background/90 sticky top-16 z-30 border-b backdrop-blur">
         <nav
           className="mx-auto flex w-full max-w-7xl gap-1 overflow-x-auto px-4 sm:px-6"
-          aria-label="Event sections"
+          aria-label={t("event.sections")}
         >
           {tabs.map((t) => {
             const active = t.exact ? pathname === t.href : pathname.startsWith(t.href);

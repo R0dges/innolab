@@ -104,6 +104,9 @@ export const GET = handle(async (req: NextRequest) => {
   for (const e of [...regs, ...judgePanels, ...organized]) {
     if (!allEventsMap.has(e.eventId)) allEventsMap.set(e.eventId, e);
   }
+  const registeredEventIds = new Set(regs.map((row) => row.eventId));
+  const coachedEventIds = new Set(judgePanels.map((row) => row.eventId));
+  const organizedEventIds = new Set(organized.map((row) => row.eventId));
   const myEventIds = [...allEventsMap.keys()];
 
   // 3. User's projects
@@ -156,6 +159,8 @@ export const GET = handle(async (req: NextRequest) => {
               eventSlug: event.slug,
               title: announcement.title,
               body: announcement.body,
+              priority: announcement.priority,
+              audience: announcement.audience,
               pinned: announcement.pinned,
               createdAt: announcement.createdAt,
             })
@@ -246,6 +251,12 @@ export const GET = handle(async (req: NextRequest) => {
 
   // Format announcements
   for (const a of announcements) {
+    const allowed =
+      a.audience === "all" ||
+      (a.audience === "participants" && registeredEventIds.has(a.eventId)) ||
+      (a.audience === "coaches" && coachedEventIds.has(a.eventId)) ||
+      (a.audience === "organizers" && organizedEventIds.has(a.eventId));
+    if (!allowed) continue;
     const preview = docToText(parseRichDoc(a.body), 120);
     items.push({
       id: `ann_${a.id}`,
@@ -254,7 +265,7 @@ export const GET = handle(async (req: NextRequest) => {
       message: preview || "An announcement was posted.",
       href: `/e/${a.eventSlug}`,
       createdAt: a.createdAt.toISOString(),
-      badge: a.pinned ? "Pinned" : "Announcement",
+      badge: a.priority === "urgent" ? "Urgent" : a.pinned ? "Pinned" : "Announcement",
     });
   }
 

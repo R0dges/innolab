@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { assignment, db, eventJudge, judgeInvite, score } from "@/lib/db";
 import { audit } from "@/lib/server/audit";
-import { loadManagedEvent } from "@/lib/server/events";
+import { loadJudgeManagedEvent } from "@/lib/server/events";
 import { handle, notFound, readBody } from "@/lib/server/http";
 import { requireUser } from "@/lib/server/identity";
 
@@ -20,7 +20,7 @@ type P = { event: string; userId: string };
 
 export const PATCH = handle<P>(async (req, { event: ref, userId }) => {
   const me = await requireUser(req);
-  const e = await loadManagedEvent(ref, me);
+  const e = await loadJudgeManagedEvent(ref, me);
   const { trackIds } = await readBody(req, z.object({ trackIds: z.array(z.string()).max(30) }));
   const res = await db
     .update(eventJudge)
@@ -40,7 +40,7 @@ export const PATCH = handle<P>(async (req, { event: ref, userId }) => {
 
 export const DELETE = handle<P>(async (req, { event: ref, userId }) => {
   const me = await requireUser(req);
-  const e = await loadManagedEvent(ref, me);
+  const e = await loadJudgeManagedEvent(ref, me);
 
   if (userId.startsWith("inv_")) {
     await db

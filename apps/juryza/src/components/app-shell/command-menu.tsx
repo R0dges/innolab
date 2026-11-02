@@ -19,6 +19,7 @@ import {
 } from "@juryza/ui/components/ui/command";
 import { Kbd } from "@juryza/ui/components/ui/kbd";
 
+import { useI18n } from "@/components/locale-provider";
 import type { Viewer } from "@/components/viewer";
 import { api } from "@/lib/api";
 
@@ -35,6 +36,7 @@ interface EventRow {
 export function CommandMenu({ viewer }: { viewer: Viewer }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
+  const { t } = useI18n();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -89,7 +91,7 @@ export function CommandMenu({ viewer }: { viewer: Viewer }) {
           <CommandInput placeholder="Type a page or event name…" />
           <CommandList>
             <CommandEmpty>Nothing matches.</CommandEmpty>
-            {mainNav(viewer).map((g) => (
+            {mainNav(viewer, t).map((g) => (
               <CommandGroup key={g.label} heading={g.label}>
                 {g.items.map((i) => (
                   <CommandItem
@@ -123,7 +125,7 @@ export function CommandMenu({ viewer }: { viewer: Viewer }) {
               </CommandGroup>
             ) : null}
             <CommandGroup heading="More">
-              {extraCommands.map((i) => (
+              {extraCommands(t).map((i) => (
                 <CommandItem key={i.href} value={i.label} onSelect={() => go(i.href)}>
                   <i.icon /> {i.label}
                 </CommandItem>

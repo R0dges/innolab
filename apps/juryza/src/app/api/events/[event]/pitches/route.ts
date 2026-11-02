@@ -12,8 +12,9 @@ import {
 } from "@/lib/innolab";
 import { audit } from "@/lib/server/audit";
 import { loadEvent } from "@/lib/server/events";
-import { created, forbidden, handle, notFound, readBody } from "@/lib/server/http";
+import { conflict, created, forbidden, handle, notFound, readBody } from "@/lib/server/http";
 import { requireUser, resolveIdentity } from "@/lib/server/identity";
+import { pitchSelectionOverview } from "@/lib/server/pitch-selection";
 import { pitchVoteRights } from "@/lib/server/pitches";
 
 type P = { event: string };
@@ -30,6 +31,9 @@ export const GET = handle<P>(async (req, { event: ref }) => {
   if (!isInnolab(e)) throw notFound("This event does not use the Innolab journey");
 
   const rights = await pitchVoteRights(e.id, me, e.createdBy);
+  const canCoach = rights.manager || rights.panelJudge;
+  const presentationOpen = Boolean(e.pitchPresentationOpenedAt);
+  const votingOpen = presentationOpen && pitchVotingIsOpen(e);
   const rows = await db
     .select({
       id: pitch.id,
@@ -65,10 +69,14 @@ export const GET = handle<P>(async (req, { event: ref }) => {
         ).map((row) => row.pitchId)
       )
     : new Set<string>();
-  const showVoteCounts = rights.manager || pitchVotingHasClosed(e);
-  const visible = rows.filter(
-    (row) => row.status !== "draft" || rights.manager || row.authorId === me?.userId
-  );
+  const showVoteCounts = canCoach || pitchVotingHasClosed(e);
+  const canSeeSubmittedPitches = canCoach || (rights.registered && presentationOpen);
+  const hasOwnPitch = rows.some((row) => row.authorId === me?.userId);
+  const visible = rows.filter((row) => {
+    if (canCoach || row.authorId === me?.userId) return true;
+    return canSeeSubmittedPitches && row.status !== "draft";
+  });
+  const selection = canCoach ? await pitchSelectionOverview(e.id) : null;
 
   return {
     event: {
@@ -94,17 +102,29 @@ export const GET = handle<P>(async (req, { event: ref }) => {
           userId: me.userId,
           registered: rights.registered,
           canManage: rights.manager,
-          canCreate: rights.registered && pitchSubmissionsAreOpen(e),
-          canVote: rights.canVote && pitchVotingIsOpen(e),
+          canCoach,
+          canCreate: rights.canPropose && pitchSubmissionsAreOpen(e) && !hasOwnPitch,
+          canVote: rights.canVote && votingOpen,
         }
       : null,
     phase: {
       submissionsOpen: pitchSubmissionsAreOpen(e),
-      votingOpen: pitchVotingIsOpen(e),
+      presentationOpen,
+      presentationCanOpen:
+        Boolean(e.pitchSubmissionsClose) && Date.now() >= (e.pitchSubmissionsClose?.getTime() ?? 0),
+      votingOpen,
       votingClosed: pitchVotingHasClosed(e),
       formationOpen: innolabProjectFormationIsOpen(e),
       showVoteCounts,
     },
+    selection: selection
+      ? {
+          ...selection,
+          finalized: Boolean(e.pitchSelectionFinalizedAt),
+          count: e.pitchSelectionCount,
+          finalizedAt: e.pitchSelectionFinalizedAt,
+        }
+      : null,
   };
 });
 
@@ -114,17 +134,33 @@ export const POST = handle<P>(async (req, { event: ref }) => {
   if (!isInnolab(e)) throw notFound("This event does not use the Innolab journey");
   const rights = await pitchVoteRights(e.id, me, e.createdBy);
   if (!rights.registered) throw forbidden("Register for this event before proposing an idea");
+  if (!rights.canPropose) {
+    throw forbidden("Only registered participants can propose an idea");
+  }
   if (!pitchSubmissionsAreOpen(e)) throw forbidden("Idea submissions are closed");
   const body = await readBody(req, pitchInput);
   const pitchId = id.pitch();
-  await db.insert(pitch).values({
-    id: pitchId,
-    eventId: e.id,
-    authorId: me.userId,
-    title: body.title,
-    description: body.description,
-    status: body.submit ? "submitted" : "draft",
-    submittedAt: body.submit ? new Date() : null,
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`pitch-author:${e.id}:${me.userId}`}))`
+    );
+    const [existing] = await tx
+      .select({ id: pitch.id })
+      .from(pitch)
+      .where(and(eq(pitch.eventId, e.id), eq(pitch.authorId, me.userId)))
+      .limit(1);
+    if (existing) {
+      throw conflict("You already have a pitch for this event");
+    }
+    await tx.insert(pitch).values({
+      id: pitchId,
+      eventId: e.id,
+      authorId: me.userId,
+      title: body.title,
+      description: body.description,
+      status: body.submit ? "submitted" : "draft",
+      submittedAt: body.submit ? new Date() : null,
+    });
   });
   await audit({
     eventId: e.id,

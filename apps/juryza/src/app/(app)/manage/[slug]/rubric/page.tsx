@@ -34,15 +34,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@juryza/ui/components/u
 import { cn } from "@juryza/ui/lib/utils";
 
 import { PageHeader } from "@/components/page";
+import { useViewer } from "@/components/viewer";
 import { api } from "@/lib/api";
 import { eventKey } from "@/lib/queries";
 import type { Json, RubricCriterion } from "@/lib/types";
 
 /**
- * Rubric editor: the weighted criteria judges mark each project on. Weights
- * are relative, so the page shows each one's normalized share live; saving
- * replaces the rubric (PUT /api/events/:slug/rubric) and results recompute on
- * read because marks are stored per criterion.
+ * Rubric viewer and admin-only editor. Weights are relative, so the page shows
+ * each one's normalized share live; saving replaces the rubric and results
+ * recompute on read because marks are stored per criterion.
  */
 
 const MAX = 12;
@@ -93,6 +93,8 @@ const same = (a: Row[], b: Row[]) =>
 
 export default function RubricPage() {
   const { slug } = useParams<{ slug: string }>();
+  const viewer = useViewer();
+  const canEdit = viewer?.role === "admin";
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["rubric", slug],
@@ -171,23 +173,40 @@ export default function RubricPage() {
         title="Rubric"
         description="The criteria judges mark every project on, and how much each one counts."
         actions={
-          <>
-            <Button
-              variant="outline"
-              disabled={!dirty || save.isPending}
-              onClick={() => setDraft(null)}
-            >
-              <RotateCcw /> Discard
-            </Button>
-            <Button
-              disabled={!dirty || problems.length > 0 || save.isPending}
-              onClick={() => save.mutate()}
-            >
-              {save.isPending ? <Spinner /> : <Save />} Save rubric
-            </Button>
-          </>
+          canEdit ? (
+            <>
+              <Button
+                variant="outline"
+                disabled={!dirty || save.isPending}
+                onClick={() => setDraft(null)}
+              >
+                <RotateCcw /> Discard
+              </Button>
+              <Button
+                disabled={!dirty || problems.length > 0 || save.isPending}
+                onClick={() => save.mutate()}
+              >
+                {save.isPending ? <Spinner /> : <Save />} Save rubric
+              </Button>
+            </>
+          ) : (
+            <Badge variant="secondary">
+              <Lock /> Read only
+            </Badge>
+          )
         }
       />
+
+      {!canEdit && (
+        <Alert>
+          <Lock />
+          <AlertTitle>Criteria managed by admins</AlertTitle>
+          <AlertDescription>
+            Coaches can consult the evaluation grid. Only a platform admin can modify its
+            criteria or weights.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {error ? (
         <Alert variant="destructive">
@@ -258,6 +277,7 @@ export default function RubricPage() {
                               <Input
                                 id={`label-${r.uid}`}
                                 value={r.label}
+                                disabled={!canEdit}
                                 maxLength={60}
                                 placeholder="e.g. Technical execution"
                                 autoFocus={!r.saved && focus === r.uid}
@@ -275,7 +295,7 @@ export default function RubricPage() {
                             size="icon-sm"
                             className="mt-6"
                             aria-label={`Remove ${r.label || "criterion"}`}
-                            disabled={rows.length <= 1}
+                            disabled={!canEdit || rows.length <= 1}
                             onClick={() => setDraft(rows.filter((x) => x.uid !== r.uid))}
                           >
                             <Trash2 />
@@ -286,6 +306,7 @@ export default function RubricPage() {
                           <Textarea
                             id={`desc-${r.uid}`}
                             value={r.description}
+                            disabled={!canEdit}
                             maxLength={400}
                             rows={2}
                             placeholder="What does a 5 look like? What does a 1 look like?"
@@ -302,6 +323,7 @@ export default function RubricPage() {
                           <div className="flex items-center gap-4">
                             <Slider
                               aria-label={`Weight for ${r.label || "criterion"}`}
+                              disabled={!canEdit}
                               min={0.5}
                               max={10}
                               step={0.5}
@@ -315,6 +337,7 @@ export default function RubricPage() {
                             <Input
                               id={`weight-${r.uid}`}
                               type="number"
+                              disabled={!canEdit}
                               inputMode="decimal"
                               min={0.1}
                               max={100}
@@ -336,7 +359,7 @@ export default function RubricPage() {
             <Button
               variant="outline"
               className="self-start"
-              disabled={rows.length >= MAX}
+              disabled={!canEdit || rows.length >= MAX}
               onClick={add}
             >
               <Plus /> Add criterion

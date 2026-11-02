@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+import {
+  DEFAULT_EVENT_LOCATION,
+  DEFAULT_EVENT_MODE,
+  DEFAULT_EVENT_WORKFLOW,
+  EVENT_MODES,
+  EVENT_WORKFLOWS,
+} from "@/lib/event-options";
 import { isoDate, optionalDate, optionalUrl, richDoc, slug } from "@/lib/server/validation";
 
 /**
@@ -14,11 +21,11 @@ const eventFields = {
   tagline: z.string().trim().max(140).nullish(),
   content: richDoc,
   rules: richDoc,
-  mode: z.enum(["online", "in-person", "hybrid"]),
+  mode: z.enum(EVENT_MODES),
   location: z.string().trim().max(120).nullish(),
   hue: z.number().int().min(0).max(360),
   visibility: z.enum(["draft", "published"]),
-  workflow: z.enum(["standard", "innolab"]),
+  workflow: z.enum(EVENT_WORKFLOWS),
   pitchSubmissionsOpen: optionalDate,
   pitchSubmissionsClose: optionalDate,
   pitchVotingOpen: optionalDate,
@@ -42,11 +49,12 @@ const eventFields = {
 
 export const eventInput = z.object({
   ...eventFields,
-  mode: eventFields.mode.default("online"),
+  mode: eventFields.mode.default(DEFAULT_EVENT_MODE),
+  location: eventFields.location.default(DEFAULT_EVENT_LOCATION),
   hue: eventFields.hue.default(250),
   visibility: eventFields.visibility.default("draft"),
-  workflow: eventFields.workflow.default("standard"),
-  maxTeamSize: eventFields.maxTeamSize.default(4),
+  workflow: eventFields.workflow.default(DEFAULT_EVENT_WORKFLOW),
+  maxTeamSize: eventFields.maxTeamSize.default(6),
   reviewsPerProject: eventFields.reviewsPerProject.default(3),
   votingAccess: eventFields.votingAccess.default("authenticated"),
   votingEmailDomains: eventFields.votingEmailDomains.default([]),

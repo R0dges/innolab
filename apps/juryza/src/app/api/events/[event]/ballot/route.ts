@@ -20,6 +20,29 @@ import { creditsSpent, maxVotesFor, seededShuffle } from "@/lib/voting";
 export const GET = handle<{ event: string }>(async (req, { event: ref }) => {
   const me = await resolveIdentity(req);
   const e = await loadEvent(ref, me);
+  if (!hasVoting(e)) {
+    return {
+      event: {
+        id: e.id,
+        slug: e.slug,
+        name: e.name,
+        votingOpen: e.votingOpen,
+        votingClose: e.votingClose,
+      },
+      enabled: false,
+      open: false,
+      access: e.votingAccess,
+      allowedDomains: e.votingEmailDomains,
+      mode: e.votingMode,
+      shortlisted: false,
+      eligible: false,
+      voter: { status: "sign-in" as const },
+      budget: e.voteBudget,
+      spent: 0,
+      maxVotesPerProject: maxVotesFor(e.voteBudget),
+      projects: [],
+    };
+  }
   const voterState = await resolveVoter(e, me, { createAnon: e.votingAccess === "open" });
 
   const projects = await db

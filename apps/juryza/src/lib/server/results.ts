@@ -26,6 +26,7 @@ import { tally } from "@/lib/voting";
  *  - `raw`: mean of judges' weighted rubric scores,
  *  - `normalized`: mean of per-judge z-score-normalized scores (JUDGING.md),
  *  - `criteria`: mean mark per rubric criterion,
+ *  - `favorites`: number of coaches who awarded their single +1 bonus,
  *  - `rank` / `rawRank` / `trackRank`,
  *  - community `votes` (quadratic tally) and pairwise Bradley–Terry strength,
  *  - the `awards` it wins under the event's prize table.
@@ -58,7 +59,12 @@ export async function computeResults(e: Pick<Event, "id">) {
       .leftJoin(team, eq(team.id, project.teamId))
       .where(eq(project.eventId, e.id)),
     db
-      .select({ judgeId: score.judgeId, projectId: score.projectId, criteria: score.criteria })
+      .select({
+        judgeId: score.judgeId,
+        projectId: score.projectId,
+        criteria: score.criteria,
+        favorite: score.favorite,
+      })
       .from(score)
       .where(eq(score.eventId, e.id)),
     db
@@ -79,7 +85,7 @@ export async function computeResults(e: Pick<Event, "id">) {
   const rows = scored.map((s) => ({
     judgeId: s.judgeId,
     projectId: s.projectId,
-    raw: rawScore(s.criteria, criteria),
+    raw: rawScore(s.criteria, criteria, s.favorite),
   }));
   const normalized = normalizeScores(rows);
 
@@ -119,6 +125,7 @@ export async function computeResults(e: Pick<Event, "id">) {
       raw: norm.length ? mean(norm.map((r) => r.raw)) : null,
       normalized: norm.length ? mean(norm.map((r) => r.normalized)) : null,
       criteria: perCriterion,
+      favorites: marks.filter((mark) => mark.favorite).length,
       votes: t?.votes ?? 0,
       voters: t?.voters ?? 0,
       pairwise: b
