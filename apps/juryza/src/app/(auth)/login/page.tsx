@@ -42,7 +42,10 @@ const DEMO_ACCOUNTS: DemoAccount[] = [
 ];
 
 export default function LoginPage() {
-  const demoAccounts = process.env.NODE_ENV === "development" ? DEMO_ACCOUNTS : [];
+  const demoAccounts =
+    process.env.NODE_ENV === "development" || process.env.SHOW_DEMO_ACCOUNTS === "true"
+      ? DEMO_ACCOUNTS
+      : [];
 
   return (
     <Suspense>
