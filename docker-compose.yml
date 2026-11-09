@@ -43,6 +43,8 @@ services:
       BETTER_AUTH_SECRET: dogfood-2026-dev-secret-please-rotate-in-prod
       BETTER_AUTH_URL: http://localhost:8080
       PORTAL_BASE_URL: http://localhost:8080
+      # The local seeded portal exposes one-click account choices on /login.
+      SHOW_DEMO_ACCOUNTS: "true"
       # Where the seed writes the generated .dogfood.toml (mounted below).
       DOGFOOD_TOML_PATH: /repo/.dogfood.toml
       FIXTURES_PATH: /repo/fixtures.json
