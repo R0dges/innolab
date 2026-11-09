@@ -49,6 +49,16 @@ export default function DashboardPage() {
   const canManageEvents = hasAtLeast(viewer?.role, "judge");
   const now = Date.now();
   const firstName = viewer?.name.split(" ")[0] ?? "vous";
+  const currentParticipation = data?.participating.find(
+    (event) =>
+      event.workflow === "innolab" &&
+      Boolean(event.activatedAt) &&
+      !event.cancelledAt &&
+      !event.archivedAt
+  );
+  const currentProject = currentParticipation
+    ? data?.projects.find((project) => project.eventSlug === currentParticipation.slug)
+    : undefined;
 
   const currentJudging = data?.judging
     .flatMap((event) => {
@@ -88,7 +98,9 @@ export default function DashboardPage() {
     data?.projects
       .filter(
         (project) =>
-          project.status !== "submitted" && new Date(project.submissionsClose).getTime() > now
+          project.eventSlug === currentParticipation?.slug &&
+          project.status !== "submitted" &&
+          new Date(project.submissionsClose).getTime() > now
       )
       .map((project) => ({
         key: `project-${project.id}`,
@@ -100,16 +112,16 @@ export default function DashboardPage() {
         icon: FolderKanban,
       })) ?? [];
 
-  const eventActions: DashboardLink[] = data?.participating[0]
+  const eventActions: DashboardLink[] = currentParticipation
     ? [
         {
-          key: `event-${data.participating[0].id}`,
+          key: `event-${currentParticipation.id}`,
           eyebrow: "Prochaine étape",
-          title: data.participating[0].name,
-          description: data.participating[0].teamName
-            ? `Retrouvez votre projet ${data.participating[0].teamName} et la suite du programme.`
+          title: currentParticipation.name,
+          description: currentParticipation.teamName
+            ? `Retrouvez votre projet ${currentParticipation.teamName} et la suite du programme.`
             : "Rejoignez un projet pour poursuivre votre parcours.",
-          href: `/e/${data.participating[0].slug}`,
+          href: `/e/${currentParticipation.slug}`,
           label: "Voir l’étape",
           icon: Compass,
         },
@@ -135,29 +147,29 @@ export default function DashboardPage() {
   );
 
   const shortcuts: DashboardLink[] = [
-    ...(data?.participating[0]
+    ...(currentParticipation
       ? [
           {
             key: "current-event",
             eyebrow: "Événement",
-            title: data.participating[0].name,
-            description: data.participating[0].teamName
-              ? `Projet ${data.participating[0].teamName}`
+            title: currentParticipation.name,
+            description: currentParticipation.teamName
+              ? `Projet ${currentParticipation.teamName}`
               : "Aucun projet rejoint",
-            href: `/e/${data.participating[0].slug}`,
+            href: `/e/${currentParticipation.slug}`,
             label: "Ouvrir",
             icon: Compass,
           },
         ]
       : []),
-    ...(data?.projects[0]
+    ...(currentProject
       ? [
           {
             key: "current-project",
             eyebrow: "Projet",
-            title: data.projects[0].title,
-            description: data.projects[0].eventName,
-            href: `/projects/${data.projects[0].id}`,
+            title: currentProject.title,
+            description: currentProject.eventName,
+            href: `/projects/${currentProject.id}`,
             label: "Ouvrir",
             icon: FolderKanban,
           },
@@ -287,8 +299,8 @@ export default function DashboardPage() {
                             <div className="text-muted-foreground flex items-center gap-2 text-xs font-semibold tracking-wide uppercase">
                               <Icon className="size-4" /> {shortcut.eyebrow}
                             </div>
-                            {shortcut.key === "current-event" && data?.participating[0] ? (
-                              <PhaseBadge event={data.participating[0]} />
+                            {shortcut.key === "current-event" && currentParticipation ? (
+                              <PhaseBadge event={currentParticipation} />
                             ) : (
                               <ArrowRight className="text-muted-foreground size-4 transition-transform group-hover:translate-x-0.5" />
                             )}
@@ -299,9 +311,9 @@ export default function DashboardPage() {
                               {shortcut.description}
                             </p>
                           </div>
-                          {shortcut.key === "current-event" && data?.participating[0] && (
+                          {shortcut.key === "current-event" && currentParticipation && (
                             <NextMilestone
-                              event={data.participating[0]}
+                              event={currentParticipation}
                               className="mt-auto text-xs"
                             />
                           )}

@@ -1,9 +1,9 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 
 import type { Event } from "@/lib/db";
 import { db, event, eventJudge, registration, team, teamMember } from "@/lib/db";
 import { hasAtLeast } from "@/lib/roles";
-import { forbidden, notFound } from "@/lib/server/http";
+import { conflict, forbidden, notFound } from "@/lib/server/http";
 import type { Identity } from "@/lib/server/identity";
 
 /**
@@ -120,5 +120,48 @@ export async function viewerForEvent(e: Event, me: Identity | null) {
 export type EventViewer = Awaited<ReturnType<typeof viewerForEvent>>;
 
 export async function register(eventId: string, userId: string) {
-  await db.insert(registration).values({ eventId, userId }).onConflictDoNothing();
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`active-participation:${userId}`}))`
+    );
+    const [target] = await tx
+      .select({
+        workflow: event.workflow,
+        activatedAt: event.activatedAt,
+        cancelledAt: event.cancelledAt,
+        archivedAt: event.archivedAt,
+      })
+      .from(event)
+      .where(eq(event.id, eventId))
+      .limit(1);
+    const isActiveInnolab =
+      target?.workflow === "innolab" &&
+      Boolean(target.activatedAt) &&
+      !target.cancelledAt &&
+      !target.archivedAt;
+
+    if (isActiveInnolab) {
+      const [existing] = await tx
+        .select({ name: event.name })
+        .from(registration)
+        .innerJoin(event, eq(event.id, registration.eventId))
+        .where(
+          and(
+            eq(registration.userId, userId),
+            ne(event.id, eventId),
+            eq(event.workflow, "innolab"),
+            eq(event.visibility, "published"),
+            sql`${event.activatedAt} is not null`,
+            sql`${event.cancelledAt} is null`,
+            sql`${event.archivedAt} is null`
+          )
+        )
+        .limit(1);
+      if (existing) {
+        throw conflict(`Vous participez déjà à l’Innovation Lab actif « ${existing.name} ».`);
+      }
+    }
+
+    await tx.insert(registration).values({ eventId, userId }).onConflictDoNothing();
+  });
 }
