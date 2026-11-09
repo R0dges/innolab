@@ -235,8 +235,10 @@ const fr = {
   "pitches.fieldBody": "Pitch d’une minute",
   "pitches.saved": "Brouillon enregistré",
   "pitches.submitted": "Pitch proposé",
+  "pitches.updated": "Pitch mis à jour",
   "pitches.saveDraft": "Enregistrer le brouillon",
   "pitches.submit": "Proposer le pitch",
+  "pitches.update": "Enregistrer les modifications",
   "pitches.presentationTitle": "Ouvrir la séance de présentation",
   "pitches.presentationHint":
     "Les titres, auteurs et descriptions restent privés jusqu’à l’ouverture de la séance par un coach.",
@@ -553,8 +555,10 @@ const en: Record<keyof typeof fr, string> = {
   "pitches.fieldBody": "One-minute pitch",
   "pitches.saved": "Draft saved",
   "pitches.submitted": "Pitch submitted",
+  "pitches.updated": "Pitch updated",
   "pitches.saveDraft": "Save draft",
   "pitches.submit": "Submit pitch",
+  "pitches.update": "Save changes",
   "pitches.presentationTitle": "Open the presentation session",
   "pitches.presentationHint":
     "Titles, authors and descriptions stay private until a coach opens the session.",

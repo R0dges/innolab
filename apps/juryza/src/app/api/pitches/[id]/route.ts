@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, pitch } from "@/lib/db";
-import { pitchSubmissionsAreOpen } from "@/lib/innolab";
+import { pitchIsEditable, pitchSubmissionsAreOpen } from "@/lib/innolab";
 import { audit } from "@/lib/server/audit";
 import { forbidden, handle, readBody } from "@/lib/server/http";
 import { requireUser } from "@/lib/server/identity";
@@ -18,7 +18,9 @@ export const PATCH = handle<{ id: string }>(async (req, { id: pitchId }) => {
   const me = await requireUser(req);
   const { pitch: current, event } = await loadPitch(pitchId);
   if (current.authorId !== me.userId) throw forbidden("Only the pitch author can edit it");
-  if (current.status !== "draft") throw forbidden("A submitted pitch can no longer be edited");
+  if (!pitchIsEditable(current.status)) {
+    throw forbidden("A selected or rejected pitch can no longer be edited");
+  }
   if (!pitchSubmissionsAreOpen(event)) throw forbidden("Idea submissions are closed");
   const body = await readBody(req, patchInput);
   await db

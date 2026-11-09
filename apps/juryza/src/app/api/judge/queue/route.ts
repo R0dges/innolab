@@ -122,6 +122,7 @@ export const GET = handle(async (req: NextRequest) => {
       scored: items.filter((item) => item.scoredAt !== null).length,
       items: items.map((item) => ({
         ...item,
+        techTags: item.techTags ?? [],
         batch: 1,
         favorite: favorite?.projectId === item.projectId,
         trackName: EVENT_TRACKS_ENABLED ? item.trackName : null,
@@ -190,6 +191,7 @@ export const GET = handle(async (req: NextRequest) => {
     scored: items.filter((i) => i.scoredAt !== null).length,
     items: items.map((i) => ({
       ...i,
+      techTags: i.techTags ?? [],
       trackName: EVENT_TRACKS_ENABLED ? i.trackName : null,
       scored: i.scoredAt !== null,
     })),

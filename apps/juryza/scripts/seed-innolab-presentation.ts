@@ -161,7 +161,7 @@ const stages: DemoStage[] = [
     pitchClose: -140,
     pitchVoteOpen: -139,
     pitchVoteClose: -2,
-    projectOpen: 120,
+    projectOpen: -1,
     projectClose: 240,
     judgingClose: 260,
     pitchStatuses: ["selected", "selected", "selected", "selected", "selected", "rejected"],
@@ -257,9 +257,12 @@ async function main() {
   }
 
   const extraParticipants = people.filter(
-    (person) => person.role === "participant" && person.id !== participant.id
+    (person) =>
+      person.role === "participant" &&
+      person.id !== participant.id &&
+      person.id !== freeParticipant.id
   );
-  const authors = [participant, ...extraParticipants].slice(0, ideas.length);
+  const authors = [participant, ...extraParticipants, freeParticipant].slice(0, ideas.length);
   if (authors.length < ideas.length) {
     throw new Error(`Six participants sont nécessaires; ${authors.length} trouvés.`);
   }
@@ -396,7 +399,8 @@ async function main() {
       .values([
         ...authors.map((author) => ({ eventId, userId: author.id })),
         { eventId, userId: freeParticipant.id },
-      ]);
+      ])
+      .onConflictDoNothing();
     await db.insert(eventJudge).values([
       { eventId, userId: judgeA.id, trackIds: [] },
       { eventId, userId: judgeB.id, trackIds: [] },

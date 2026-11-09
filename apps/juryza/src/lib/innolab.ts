@@ -27,6 +27,11 @@ export function pitchSubmissionsAreOpen(event: InnolabDates, now = Date.now()): 
   return (open === null || now >= open) && now < close;
 }
 
+/** A proposed pitch remains editable until the event closes idea submissions. */
+export function pitchIsEditable(status: string): boolean {
+  return status === "draft" || status === "submitted";
+}
+
 export function pitchVotingIsOpen(event: InnolabDates, now = Date.now()): boolean {
   if (!isInnolab(event)) return false;
   const open = time(event.pitchVotingOpen);

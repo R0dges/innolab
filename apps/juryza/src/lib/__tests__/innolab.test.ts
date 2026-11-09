@@ -4,6 +4,7 @@ import {
   eventRegistrationIsOpen,
   innolabProjectFormationIsOpen,
   innolabRosterChangesRequireCoach,
+  pitchIsEditable,
   pitchSubmissionsAreOpen,
   pitchVotingHasClosed,
   pitchVotingIsOpen,
@@ -31,6 +32,13 @@ describe("Innolab phases", () => {
     const projectTime = new Date(at(3)).getTime();
     expect(pitchVotingHasClosed(event, projectTime)).toBe(true);
     expect(innolabProjectFormationIsOpen(event, projectTime)).toBe(true);
+  });
+
+  test("keeps draft and submitted pitches editable until the submission deadline", () => {
+    expect(pitchIsEditable("draft")).toBe(true);
+    expect(pitchIsEditable("submitted")).toBe(true);
+    expect(pitchIsEditable("selected")).toBe(false);
+    expect(pitchIsEditable("rejected")).toBe(false);
   });
 
   test("registration spans idea collection through the project deadline", () => {

@@ -41,14 +41,12 @@ import { Input } from "@juryza/ui/components/ui/input";
 import { Skeleton } from "@juryza/ui/components/ui/skeleton";
 import { Spinner } from "@juryza/ui/components/ui/spinner";
 import { Textarea } from "@juryza/ui/components/ui/textarea";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@juryza/ui/components/ui/toggle-group";
+import { ToggleGroup, ToggleGroupItem } from "@juryza/ui/components/ui/toggle-group";
 
-import { UserAvatar } from "@/components/user-avatar";
 import { useI18n } from "@/components/locale-provider";
+import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/lib/api";
+import { pitchIsEditable } from "@/lib/innolab";
 
 type PitchStatus = "draft" | "submitted" | "selected" | "rejected";
 
@@ -150,9 +148,7 @@ export default function PitchesPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex flex-col gap-1">
           <h2 className="text-2xl font-semibold tracking-tight">{t("pitches.title")}</h2>
-          <p className="text-muted-foreground max-w-2xl text-sm">
-            {t("pitches.description")}
-          </p>
+          <p className="text-muted-foreground max-w-2xl text-sm">{t("pitches.description")}</p>
         </div>
         {data.viewer?.canCreate && (
           <PitchDialog
@@ -176,21 +172,20 @@ export default function PitchesPage() {
         data.phase.presentationOpen &&
         data.phase.votingClosed &&
         data.selection &&
-        !data.selection.finalized && (
-          (data.selection.tieBreak ? (
-            <TieBreakPanel
-              key={data.selection.tieBreak.round}
-              slug={slug}
-              count={data.selection.count ?? 0}
-              tieBreak={data.selection.tieBreak}
-              pitches={pitches}
-              canVote={data.viewer.canCoachVote}
-              onSaved={refresh}
-            />
-          ) : (
-            <SelectionPanel slug={slug} selection={data.selection} onSaved={refresh} />
-          ))
-        )}
+        !data.selection.finalized &&
+        (data.selection.tieBreak ? (
+          <TieBreakPanel
+            key={data.selection.tieBreak.round}
+            slug={slug}
+            count={data.selection.count ?? 0}
+            tieBreak={data.selection.tieBreak}
+            pitches={pitches}
+            canVote={data.viewer.canCoachVote}
+            onSaved={refresh}
+          />
+        ) : (
+          <SelectionPanel slug={slug} selection={data.selection} onSaved={refresh} />
+        ))}
       {data.selection?.finalized && (
         <Alert>
           <Rocket />
@@ -353,7 +348,7 @@ function PitchCard({
                   {author}
                 </CardDescription>
               </div>
-              {pitch.mine && pitch.status === "draft" && phase.submissionsOpen && (
+              {pitch.mine && pitchIsEditable(pitch.status) && phase.submissionsOpen && (
                 <PitchDialog
                   slug={slug}
                   pitch={pitch}
@@ -389,7 +384,9 @@ function PitchCard({
             <div className="text-center">
               <p className="text-2xl font-semibold tabular-nums">{pitch.votes ?? "—"}</p>
               <p className="text-muted-foreground text-xs">
-                {pitch.votes === null ? t("pitches.hidden") : `${pitch.votes} ${t("pitches.votes")}`}
+                {pitch.votes === null
+                  ? t("pitches.hidden")
+                  : `${pitch.votes} ${t("pitches.votes")}`}
               </p>
             </div>
             {viewer?.canVote && !pitch.mine && pitch.status === "submitted" && (
@@ -446,6 +443,7 @@ function PitchDialog({
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState(pitch?.title ?? "");
   const [description, setDescription] = useState(pitch?.description ?? "");
+  const alreadySubmitted = pitch?.status === "submitted";
   const save = useMutation({
     mutationFn: (submit: boolean) =>
       pitch
@@ -456,7 +454,13 @@ function PitchDialog({
           })
         : api.post(`/api/events/${slug}/pitches`, { title, description, submit }),
     onSuccess: (_result, submit) => {
-      toast.success(submit ? t("pitches.submitted") : t("pitches.saved"));
+      toast.success(
+        alreadySubmitted
+          ? t("pitches.updated")
+          : submit
+            ? t("pitches.submitted")
+            : t("pitches.saved")
+      );
       setOpen(false);
       onSaved();
     },
@@ -501,17 +505,26 @@ function PitchDialog({
           </Field>
         </FieldGroup>
         <DialogFooter>
+          {!alreadySubmitted && (
+            <Button
+              variant="outline"
+              onClick={() => save.mutate(false)}
+              disabled={!ready || save.isPending}
+            >
+              {save.isPending && <Spinner data-icon="inline-start" />}
+              {t("pitches.saveDraft")}
+            </Button>
+          )}
           <Button
-            variant="outline"
-            onClick={() => save.mutate(false)}
+            onClick={() => save.mutate(!alreadySubmitted)}
             disabled={!ready || save.isPending}
           >
-            {save.isPending && <Spinner data-icon="inline-start" />}
-            {t("pitches.saveDraft")}
-          </Button>
-          <Button onClick={() => save.mutate(true)} disabled={!ready || save.isPending}>
-            <Rocket data-icon="inline-start" />
-            {t("pitches.submit")}
+            {save.isPending ? (
+              <Spinner data-icon="inline-start" />
+            ) : (
+              <Rocket data-icon="inline-start" />
+            )}
+            {alreadySubmitted ? t("pitches.update") : t("pitches.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -773,7 +786,11 @@ function TieBreakPanel({
           disabled={!canVote || !ready || vote.isPending}
           onClick={() => vote.mutate()}
         >
-          {vote.isPending ? <Spinner data-icon="inline-start" /> : <Vote data-icon="inline-start" />}
+          {vote.isPending ? (
+            <Spinner data-icon="inline-start" />
+          ) : (
+            <Vote data-icon="inline-start" />
+          )}
           {t("pitches.tieSaveVote")}
         </Button>
         <Button disabled={count < 1 || finalize.isPending} onClick={() => finalize.mutate()}>
