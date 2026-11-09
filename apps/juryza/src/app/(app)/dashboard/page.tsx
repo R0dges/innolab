@@ -50,8 +50,8 @@ export default function DashboardPage() {
   const now = Date.now();
   const firstName = viewer?.name.split(" ")[0] ?? "vous";
 
-  const judgingActions: DashboardLink[] =
-    data?.judging.flatMap((event) => {
+  const currentJudging = data?.judging
+    .flatMap((event) => {
       const opens = event.judgingOpen
         ? new Date(event.judgingOpen).getTime()
         : new Date(event.submissionsClose).getTime();
@@ -60,21 +60,29 @@ export default function DashboardPage() {
       const remaining = Math.max(0, event.assigned - event.scored);
 
       if (isClosed || opens > now || remaining === 0) return [];
+      return [{ event, remaining, closes: closes ?? Number.MAX_SAFE_INTEGER }];
+    })
+    .toSorted(
+      (left, right) =>
+        Number(right.event.workflow === "innolab") - Number(left.event.workflow === "innolab") ||
+        left.closes - right.closes
+    )[0];
 
-      return [
+  const judgingActions: DashboardLink[] = currentJudging
+    ? [
         {
-          key: `judging-${event.id}`,
+          key: `judging-${currentJudging.event.id}`,
           eyebrow: "Délibération",
-          title: `Évaluer ${event.name}`,
-          description: `${remaining} projet${remaining > 1 ? "s" : ""} reste${
-            remaining > 1 ? "nt" : ""
-          } à noter collectivement.`,
-          href: `/judging/${event.slug}`,
+          title: `Évaluer ${currentJudging.event.name}`,
+          description: `${currentJudging.remaining} projet${
+            currentJudging.remaining > 1 ? "s" : ""
+          } reste${currentJudging.remaining > 1 ? "nt" : ""} à noter collectivement.`,
+          href: `/judging/${currentJudging.event.slug}`,
           label: "Continuer",
           icon: Gavel,
         },
-      ];
-    }) ?? [];
+      ]
+    : [];
 
   const projectActions: DashboardLink[] =
     data?.projects

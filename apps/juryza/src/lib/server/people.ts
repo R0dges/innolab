@@ -71,6 +71,7 @@ export async function overviewFor(userId: string) {
         slug: event.slug,
         name: event.name,
         hue: event.hue,
+        workflow: event.workflow,
         submissionsClose: event.submissionsClose,
         judgingOpen: event.judgingOpen,
         judgingClose: event.judgingClose,

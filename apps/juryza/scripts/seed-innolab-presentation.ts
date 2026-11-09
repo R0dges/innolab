@@ -20,6 +20,7 @@ import {
   user,
 } from "@/lib/db";
 import { id } from "@/lib/ids";
+import { selectRankedPitches } from "@/lib/server/pitch-selection";
 
 const DAY = 24 * 60 * 60 * 1000;
 const now = Date.now();
@@ -420,13 +421,21 @@ async function main() {
       });
     }
 
-    const submittedPitches = pitchIds.flatMap((pitchId, index) =>
-      stage.pitchStatuses[index] === "draft" || !pitchId
-        ? []
-        : [{ pitchId, author: authors[index] }]
+    const submittedPitches = pitchIds.flatMap((pitchId, index) => {
+      const status = stage.pitchStatuses[index];
+      const author = authors[index];
+      return status === "draft" || !pitchId || !author ? [] : [{ pitchId, author, status }];
+    });
+    const selectedPitchIds = new Set(
+      submittedPitches.filter(({ status }) => status === "selected").map(({ pitchId }) => pitchId)
     );
-    for (const voter of authors) {
-      const choice = submittedPitches.find(({ author }) => author?.id !== voter.id);
+    const voteablePitches = selectedPitchIds.size
+      ? submittedPitches.filter(({ pitchId }) => selectedPitchIds.has(pitchId))
+      : submittedPitches;
+    const voteCounts = new Map<string, number>();
+    for (const [voterIndex, voter] of authors.entries()) {
+      const choices = voteablePitches.filter(({ author }) => author.id !== voter.id);
+      const choice = choices[voterIndex % choices.length];
       if (!choice) continue;
       await db.insert(pitchVote).values({
         id: id.pitchVote(),
@@ -434,6 +443,25 @@ async function main() {
         pitchId: choice.pitchId,
         voterId: voter.id,
       });
+      voteCounts.set(choice.pitchId, (voteCounts.get(choice.pitchId) ?? 0) + 1);
+    }
+
+    if (selectedPitchIds.size) {
+      const seededSelection = selectRankedPitches(
+        submittedPitches.map(({ pitchId, author }, index) => ({
+          id: pitchId,
+          authorId: author.id,
+          votes: voteCounts.get(pitchId) ?? 0,
+          createdAt: new Date(index),
+        })),
+        selectedPitchIds.size
+      );
+      const selectionMatches =
+        seededSelection.tieCandidateIds.length === 0 &&
+        seededSelection.selectedIds.every((pitchId) => selectedPitchIds.has(pitchId));
+      if (!selectionMatches) {
+        throw new Error(`La sélection de démonstration ${stage.slug} contredit les votes simulés.`);
+      }
     }
 
     const projectIds: string[] = [];

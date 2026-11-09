@@ -44,6 +44,12 @@ describe("selectRankedPitches", () => {
     expect(result.tieCandidateIds).toEqual([]);
   });
 
+  test("keeps the two-vote pitch when five of six pitches are promoted", () => {
+    const result = selectRankedPitches(candidates([2, 1, 1, 1, 1, 0]), 5);
+    expect(result.selectedIds).toEqual(["pitch-1", "pitch-2", "pitch-3", "pitch-4", "pitch-5"]);
+    expect(result.tieCandidateIds).toEqual([]);
+  });
+
   test("requires a coach runoff when an equality crosses the cutoff", () => {
     const result = selectRankedPitches(candidates([2, 1, 1, 0]), 2);
     expect(result.selectedIds).toEqual(["pitch-1"]);

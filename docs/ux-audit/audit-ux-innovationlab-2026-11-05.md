@@ -87,6 +87,7 @@ La plateforme ne peut toutefois pas être considérée comme opérationnellement
 | Preuve | [Capture de la sélection](evidence/selection-outcome-participant.png). Reproduction : créer deux pitchs, voter pour l’un, clôturer, demander un projet, confirmer « Créer les projets ». |
 | Impact | Décision métier erronée et irréversible ; mauvais projet, équipe et responsable créés. La confiance dans les votes et la traçabilité est directement compromise. |
 | Gravité | **Critique** |
+| Statut au 2026-11-09 | **Corrigé.** La Promotion réutilise le classement serveur testé et le jeu de démonstration refuse désormais toute sélection contradictoire avec ses votes. Le scénario 3/6 affiche cinq pitchs retenus à 2, 1, 1, 1 et 1 vote, puis le pitch non retenu à 0 vote. |
 | Cause | **Inférée après inspection :** le sous-select corrélé qui compte les votes dans `pitch-selection/route.ts` est susceptible d’attribuer le même total aux candidats, puis le tirage de départage décide. L’écran de pitchs utilise un autre comptage et affiche bien 1 puis 0. |
 | Recommandation | Calculer les totaux par `pitchId` dans une agrégation explicite, les joindre aux candidats, et refuser la finalisation si l’ordre serveur diffère du classement prévisualisé. |
 | Implémentation | Retourner dans la prévisualisation la shortlist ordonnée `{pitchId, votes, rang}` produite par la même fonction que la transaction. Afficher cette shortlist dans la confirmation. Journaliser les totaux utilisés. |
@@ -269,6 +270,7 @@ Cette évolution adapte le tableau de bord au rôle et à la phase. Elle réorga
 |---|---|
 | Rôles | Aucun coach responsable. Tous les coachs du lieu sont rattachés automatiquement et disposent des mêmes droits métier. L’admin reste un rôle technique global. |
 | Événements | Un seul événement actif par lieu ; les brouillons futurs restent permis. Une seconde activation est refusée en indiquant le créateur du premier événement. |
+| Dashboard coach | Une seule délibération Innovation Lab active est présentée : un coach n’évalue jamais deux événements Innovation Lab simultanément. |
 | Grille | Modifiable par tous les coachs rattachés jusqu’à la Promotion, puis verrouillée et historisée. |
 | Évaluation | Évaluation et délibération sont une seule phase : une note collective de 1 à 5 par critère et projet, sans affectation individuelle ni Z-score. |
 | Coup de cœur | Un choix par coach et par événement ; chaque point est ajouté avant la moyenne des critères. |
