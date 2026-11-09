@@ -270,7 +270,7 @@ Cette évolution adapte le tableau de bord au rôle et à la phase. Elle réorga
 |---|---|
 | Rôles | Aucun coach responsable. Tous les coachs du lieu sont rattachés automatiquement et disposent des mêmes droits métier. L’admin reste un rôle technique global. |
 | Événements | Un seul événement actif par lieu ; les brouillons futurs restent permis. Une seconde activation est refusée en indiquant le créateur du premier événement. |
-| Dashboard participant | Un participant ne participe jamais à deux Innovation Labs simultanément. Le dashboard ne mélange que les actions et le projet de son unique événement actif ; les anciens événements restent dans les archives. |
+| Dashboard participant | Un participant ne participe jamais à deux Innovation Labs simultanément. Le dashboard ne mélange que les actions et le projet de son unique événement actif, affiche son calendrier et, lorsqu’un projet est en cours, ses sources documentaires et le chat référent. Les anciens événements restent dans les archives. |
 | Dashboard coach | Une seule délibération Innovation Lab active est présentée : un coach n’évalue jamais deux événements Innovation Lab simultanément. |
 | Grille | Modifiable par tous les coachs rattachés jusqu’à la Promotion, puis verrouillée et historisée. |
 | Évaluation | Évaluation et délibération sont une seule phase : une note collective de 1 à 5 par critère et projet, sans affectation individuelle ni Z-score. |

@@ -5,7 +5,9 @@ import {
   assignment,
   db,
   event,
+  eventAssistant,
   eventJudge,
+  eventResource,
   pitch,
   pitchVote,
   pool,
@@ -13,6 +15,7 @@ import {
   project,
   registration,
   rubricCriterion,
+  scheduleItem,
   score,
   team,
   teamMember,
@@ -108,6 +111,7 @@ type DemoStage = {
   judging: "none" | "partial" | "complete";
   resultsPublished: boolean;
   announcement: string;
+  active?: boolean;
 };
 
 const stages: DemoStage[] = [
@@ -204,6 +208,7 @@ const stages: DemoStage[] = [
     resultsPublished: false,
     announcement:
       "Les livrables sont figés. Le jury désigné par les administrateurs peut maintenant évaluer les projets.",
+    active: true,
   },
   {
     slug: "demo-innolab-06-resultats",
@@ -313,6 +318,7 @@ async function main() {
       votingAccess: "authenticated",
       voteBudget: 0,
       createdBy: admin.id,
+      activatedAt: stage.active ? new Date() : null,
     });
 
     const trackIds = [id.track(), id.track()] as const;
@@ -402,6 +408,71 @@ async function main() {
       pinned: true,
       authorId: admin.id,
     });
+
+    if (stage.active) {
+      const workshopStartsAt = at(1);
+      const coachingStartsAt = at(2);
+      const finalStartsAt = at(3);
+      await db.insert(scheduleItem).values([
+        {
+          id: id.scheduleItem(),
+          eventId,
+          title: "Atelier de consolidation",
+          description: "Finaliser les preuves, les sources et la démonstration du projet.",
+          startsAt: workshopStartsAt,
+          endsAt: new Date(workshopStartsAt.getTime() + 90 * 60 * 1000),
+          location: "Salle projet",
+          kind: "workshop",
+          audience: "participants",
+          required: true,
+          createdBy: admin.id,
+        },
+        {
+          id: id.scheduleItem(),
+          eventId,
+          title: "Point avec les coachs",
+          description: "Questions ouvertes et préparation de la présentation finale.",
+          startsAt: coachingStartsAt,
+          endsAt: new Date(coachingStartsAt.getTime() + 45 * 60 * 1000),
+          location: "Espace coaching",
+          kind: "intergroup",
+          audience: "participants",
+          required: false,
+          createdBy: admin.id,
+        },
+        {
+          id: id.scheduleItem(),
+          eventId,
+          title: "Présentation finale",
+          description: "Présentation des projets et délibération collective des coachs.",
+          startsAt: finalStartsAt,
+          endsAt: new Date(finalStartsAt.getTime() + 2 * 60 * 60 * 1000),
+          location: "Auditorium",
+          kind: "final",
+          audience: "all",
+          required: true,
+          createdBy: admin.id,
+        },
+      ]);
+      await db.insert(eventResource).values({
+        id: id.eventResource(),
+        eventId,
+        kind: "accessible",
+        name: "Dossier documentaire Innovation Lab",
+        category: "Documentation",
+        description: "Sources, méthodes et documents utiles aux projets.",
+        url: "https://example.com/innovation-lab/documentation",
+        accessLevel: "event",
+        availability: "available",
+        position: 0,
+        createdBy: admin.id,
+      });
+      await db.insert(eventAssistant).values({
+        eventId,
+        url: "https://copilot.microsoft.com/",
+        updatedBy: admin.id,
+      });
+    }
 
     const pitchIds: string[] = [];
     for (const [index, idea] of ideas.entries()) {

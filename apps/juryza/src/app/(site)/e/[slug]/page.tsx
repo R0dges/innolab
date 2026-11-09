@@ -747,7 +747,7 @@ function EventSchedule({ slug, data }: { slug: string; data: EventDashboard }) {
   }, new Map());
 
   return (
-    <section className="flex flex-col gap-3">
+    <section id="calendar" className="flex scroll-mt-24 flex-col gap-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <SectionTitle icon={CalendarDays} hint={pluralize(data.schedule.length, "activity")}>
           Innovation Lab calendar

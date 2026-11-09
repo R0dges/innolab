@@ -1,13 +1,17 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 import {
   assignment,
   certificate,
   db,
   event,
+  eventAssistant,
+  eventDocument,
   eventJudge,
+  eventResource,
   project,
   registration,
+  scheduleItem,
   score,
   team,
   teamMember,
@@ -17,6 +21,88 @@ import {
 import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 
 /** Read models about a person: their dashboard and their public profile. */
+
+export async function currentParticipantContextFor(userId: string) {
+  const [activeEvent] = await db
+    .select({ id: event.id, slug: event.slug, name: event.name })
+    .from(registration)
+    .innerJoin(event, eq(event.id, registration.eventId))
+    .where(
+      and(
+        eq(registration.userId, userId),
+        eq(event.workflow, "innolab"),
+        eq(event.visibility, "published"),
+        sql`${event.activatedAt} is not null`,
+        sql`${event.cancelledAt} is null`,
+        sql`${event.archivedAt} is null`
+      )
+    )
+    .orderBy(desc(event.activatedAt))
+    .limit(1);
+  if (!activeEvent) return null;
+
+  const [schedule, resources, auditDocuments, assistants] = await Promise.all([
+    db
+      .select({
+        id: scheduleItem.id,
+        title: scheduleItem.title,
+        startsAt: scheduleItem.startsAt,
+        endsAt: scheduleItem.endsAt,
+        location: scheduleItem.location,
+        required: scheduleItem.required,
+      })
+      .from(scheduleItem)
+      .where(
+        and(
+          eq(scheduleItem.eventId, activeEvent.id),
+          eq(scheduleItem.status, "scheduled"),
+          inArray(scheduleItem.audience, ["all", "participants"])
+        )
+      )
+      .orderBy(asc(scheduleItem.startsAt), asc(scheduleItem.endsAt), asc(scheduleItem.title)),
+    db
+      .select({
+        id: eventResource.id,
+        name: eventResource.name,
+        description: eventResource.description,
+        url: eventResource.url,
+      })
+      .from(eventResource)
+      .where(
+        and(
+          eq(eventResource.eventId, activeEvent.id),
+          sql`${eventResource.url} is not null`,
+          sql`${eventResource.availability} <> 'unavailable'`
+        )
+      )
+      .orderBy(asc(eventResource.position), asc(eventResource.name)),
+    db
+      .select({ id: eventDocument.id, title: eventDocument.title, url: eventDocument.url })
+      .from(eventDocument)
+      .where(
+        and(
+          eq(eventDocument.eventId, activeEvent.id),
+          eq(eventDocument.kind, "audit"),
+          eq(eventDocument.isCurrent, true)
+        )
+      )
+      .orderBy(desc(eventDocument.version))
+      .limit(1),
+    db
+      .select({ url: eventAssistant.url })
+      .from(eventAssistant)
+      .where(eq(eventAssistant.eventId, activeEvent.id))
+      .limit(1),
+  ]);
+
+  return {
+    event: activeEvent,
+    schedule,
+    resources,
+    audit: auditDocuments[0] ?? null,
+    assistant: assistants[0] ?? null,
+  };
+}
 
 export async function overviewFor(userId: string) {
   const [participating, projects, judging, organizing, certificates] = await Promise.all([
@@ -55,6 +141,8 @@ export async function overviewFor(userId: string) {
         tagline: project.tagline,
         status: project.status,
         thumbnailUrl: project.thumbnailUrl,
+        repoUrl: project.repoUrl,
+        liveUrl: project.liveUrl,
         updatedAt: project.updatedAt,
         eventSlug: event.slug,
         eventName: event.name,
@@ -76,6 +164,9 @@ export async function overviewFor(userId: string) {
         name: event.name,
         hue: event.hue,
         workflow: event.workflow,
+        activatedAt: event.activatedAt,
+        cancelledAt: event.cancelledAt,
+        archivedAt: event.archivedAt,
         submissionsClose: event.submissionsClose,
         judgingOpen: event.judgingOpen,
         judgingClose: event.judgingClose,
