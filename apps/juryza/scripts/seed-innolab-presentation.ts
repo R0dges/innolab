@@ -2,7 +2,8 @@ import { asc, like } from "drizzle-orm";
 
 import {
   announcement,
-  assignment,
+  coachFavorite,
+  collectiveScore,
   db,
   event,
   eventAssistant,
@@ -16,7 +17,6 @@ import {
   registration,
   rubricCriterion,
   scheduleItem,
-  score,
   team,
   teamMember,
   track,
@@ -238,14 +238,6 @@ const marksA = [
   { impact: 3, feasibility: 3, presentation: 4 },
 ] as const;
 
-const marksB = [
-  { impact: 5, feasibility: 4, presentation: 4 },
-  { impact: 4, feasibility: 5, presentation: 5 },
-  { impact: 4, feasibility: 3, presentation: 4 },
-  { impact: 3, feasibility: 4, presentation: 3 },
-  { impact: 3, feasibility: 3, presentation: 3 },
-] as const;
-
 async function main() {
   const people = await db
     .select({ id: user.id, email: user.email, role: user.role, name: user.name })
@@ -272,7 +264,16 @@ async function main() {
     throw new Error(`Six participants sont nécessaires; ${authors.length} trouvés.`);
   }
 
-  await db.delete(event).where(like(event.slug, "demo-innolab-%"));
+  const resetAllEvents = process.argv.includes("--reset-all-events");
+  if (resetAllEvents) {
+    const existingEvents = await db.select({ id: event.id }).from(event);
+    console.info(
+      `[demo] Remise à zéro : suppression de ${existingEvents.length} événement(s) et de leurs données liées.`
+    );
+    await db.delete(event);
+  } else {
+    await db.delete(event).where(like(event.slug, "demo-innolab-%"));
+  }
 
   for (const stage of stages) {
     const eventId = id.event();
@@ -582,41 +583,33 @@ async function main() {
     }
 
     if (stage.judging !== "none") {
-      const judgeAssignments = [
-        { judge: judgeA, indexes: [0, 1, 2, 3] },
-        { judge: judgeB, indexes: [1, 2, 3, 4] },
-      ] as const;
-      for (const group of judgeAssignments) {
-        for (const [position, projectIndex] of group.indexes.entries()) {
-          const projectId = projectIds[projectIndex];
-          if (!projectId) throw new Error(`Projet manquant à la position ${projectIndex + 1}.`);
-          await db.insert(assignment).values({
-            id: id.assignment(),
-            eventId,
-            judgeId: group.judge.id,
-            projectId,
-            batch: position < 2 ? 1 : 2,
-          });
-          const shouldScore =
-            stage.judging === "complete" ||
-            (group.judge.id === judgeA.id ? position < 2 : position < 1);
-          if (shouldScore) {
-            const criteria =
-              group.judge.id === judgeA.id ? marksA[projectIndex] : marksB[projectIndex];
-            await db.insert(score).values({
-              id: id.score(),
-              eventId,
-              judgeId: group.judge.id,
-              projectId,
-              criteria,
-              comment:
-                projectIndex < 2
-                  ? "Proposition convaincante, bien reliée au besoin et clairement démontrée."
-                  : "Bonne base. Le prochain pilote devra préciser les indicateurs de succès.",
-            });
-          }
-        }
+      const scoredProjectCount = stage.judging === "complete" ? projectIds.length : 2;
+      for (const [projectIndex, projectId] of projectIds.entries()) {
+        if (projectIndex >= scoredProjectCount) break;
+        const criteria = marksA[projectIndex];
+        if (!criteria) throw new Error(`Notes manquantes à la position ${projectIndex + 1}.`);
+        await db.insert(collectiveScore).values({
+          id: id.collectiveScore(),
+          eventId,
+          projectId,
+          criteria,
+          comment:
+            projectIndex < 2
+              ? "Consensus des coachs : proposition convaincante, bien reliée au besoin et clairement démontrée."
+              : "Consensus des coachs : bonne base. Le prochain pilote devra préciser les indicateurs de succès.",
+          updatedBy: judgeA.id,
+        });
       }
+
+      const firstProjectId = projectIds[0];
+      const secondProjectId = projectIds[1];
+      if (!firstProjectId || !secondProjectId) {
+        throw new Error("Deux projets sont nécessaires pour les coups de cœur de démonstration.");
+      }
+      await db.insert(coachFavorite).values([
+        { eventId, coachId: judgeA.id, projectId: firstProjectId },
+        { eventId, coachId: judgeB.id, projectId: secondProjectId },
+      ]);
     }
 
     console.info(`[demo] ${stage.slug} créé`);
