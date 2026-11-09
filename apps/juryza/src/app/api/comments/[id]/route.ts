@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { comment, db, event } from "@/lib/db";
 import { audit } from "@/lib/server/audit";
-import { canManage } from "@/lib/server/events";
+import { canManage, isEventCoach } from "@/lib/server/events";
 import { forbidden, handle, notFound } from "@/lib/server/http";
 import { requireUser } from "@/lib/server/identity";
 
@@ -16,7 +16,7 @@ export const DELETE = handle<{ id: string }>(async (req, { id: commentId }) => {
     .where(eq(comment.id, commentId))
     .limit(1);
   if (!row) throw notFound("Comment not found");
-  const moderator = canManage(me, row.event);
+  const moderator = canManage(me, row.event) || (await isEventCoach(row.event.id, me.userId));
   if (row.comment.authorId !== me.userId && !moderator)
     throw forbidden("You can only delete your own comments");
 

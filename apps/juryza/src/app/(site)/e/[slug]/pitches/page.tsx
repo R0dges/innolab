@@ -41,6 +41,10 @@ import { Input } from "@juryza/ui/components/ui/input";
 import { Skeleton } from "@juryza/ui/components/ui/skeleton";
 import { Spinner } from "@juryza/ui/components/ui/spinner";
 import { Textarea } from "@juryza/ui/components/ui/textarea";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@juryza/ui/components/ui/toggle-group";
 
 import { UserAvatar } from "@/components/user-avatar";
 import { useI18n } from "@/components/locale-provider";
@@ -74,6 +78,7 @@ interface PitchList {
     registered: boolean;
     canManage: boolean;
     canCoach: boolean;
+    canCoachVote: boolean;
     canCreate: boolean;
     canVote: boolean;
   };
@@ -93,6 +98,13 @@ interface PitchList {
     finalized: boolean;
     count: number | null;
     finalizedAt: string | null;
+    tieBreak: null | {
+      round: number;
+      candidatePitchIds: string[];
+      slots: number;
+      totals: { pitchId: string; votes: number }[];
+      myPitchIds: string[];
+    };
   };
 }
 
@@ -125,7 +137,12 @@ export default function PitchesPage() {
   if (isLoading || !data) return <PitchSkeleton />;
 
   const pitches = data.phase.showVoteCounts
-    ? data.pitches.toSorted((a, b) => (b.votes ?? 0) - (a.votes ?? 0))
+    ? data.pitches.toSorted(
+        (a, b) =>
+          (b.votes ?? 0) - (a.votes ?? 0) ||
+          a.createdAt.localeCompare(b.createdAt) ||
+          a.id.localeCompare(b.id)
+      )
     : data.pitches;
 
   return (
@@ -160,7 +177,19 @@ export default function PitchesPage() {
         data.phase.votingClosed &&
         data.selection &&
         !data.selection.finalized && (
-          <SelectionPanel slug={slug} selection={data.selection} onSaved={refresh} />
+          (data.selection.tieBreak ? (
+            <TieBreakPanel
+              key={data.selection.tieBreak.round}
+              slug={slug}
+              count={data.selection.count ?? 0}
+              tieBreak={data.selection.tieBreak}
+              pitches={pitches}
+              canVote={data.viewer.canCoachVote}
+              onSaved={refresh}
+            />
+          ) : (
+            <SelectionPanel slug={slug} selection={data.selection} onSaved={refresh} />
+          ))
         )}
       {data.selection?.finalized && (
         <Alert>
@@ -576,9 +605,10 @@ function SelectionPanel({
   const { t } = useI18n();
   const valid = Number.isInteger(count) && count >= 1 && count <= selection.candidateCount;
   const save = useMutation({
-    mutationFn: () => api.post(`/api/events/${slug}/pitch-selection`, { count }),
-    onSuccess: () => {
-      toast.success(t("pitches.projectsCreated"));
+    mutationFn: () =>
+      api.post<{ finalized: boolean }>(`/api/events/${slug}/pitch-selection`, { count }),
+    onSuccess: (result) => {
+      toast.success(result.finalized ? t("pitches.projectsCreated") : t("pitches.tieOpened"));
       setConfirmOpen(false);
       onSaved();
     },
@@ -644,6 +674,116 @@ function SelectionPanel({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      </CardFooter>
+    </Card>
+  );
+}
+
+function TieBreakPanel({
+  slug,
+  count,
+  tieBreak,
+  pitches,
+  canVote,
+  onSaved,
+}: {
+  slug: string;
+  count: number;
+  tieBreak: NonNullable<NonNullable<PitchList["selection"]>["tieBreak"]>;
+  pitches: PitchRow[];
+  canVote: boolean;
+  onSaved: () => void;
+}) {
+  const [choices, setChoices] = useState<string[]>(tieBreak.myPitchIds);
+  const { t } = useI18n();
+  const candidates = tieBreak.candidatePitchIds.flatMap((pitchId) => {
+    const candidate = pitches.find((pitch) => pitch.id === pitchId);
+    return candidate ? [candidate] : [];
+  });
+  const totals = new Map(tieBreak.totals.map((total) => [total.pitchId, total.votes]));
+  const ready = choices.length === tieBreak.slots;
+  const vote = useMutation({
+    mutationFn: () =>
+      api.post(`/api/events/${slug}/pitch-selection/tie-break`, { pitchIds: choices }),
+    onSuccess: () => {
+      toast.success(t("pitches.tieVoteSaved"));
+      onSaved();
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const finalize = useMutation({
+    mutationFn: () =>
+      api.post<{ finalized: boolean }>(`/api/events/${slug}/pitch-selection`, {
+        count,
+      }),
+    onSuccess: (result) => {
+      toast.success(result.finalized ? t("pitches.projectsCreated") : t("pitches.tieNextRound"));
+      onSaved();
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle>{t("pitches.tieTitle")}</CardTitle>
+          <Badge variant="secondary">
+            {t("pitches.tieRound")} {tieBreak.round}
+          </Badge>
+        </div>
+        <CardDescription>
+          {t("pitches.tieHint")} {tieBreak.slots} {t("pitches.tieChoiceCount")}.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ToggleGroup
+          multiple
+          orientation="vertical"
+          variant="outline"
+          value={choices}
+          disabled={!canVote || vote.isPending}
+          className="w-full"
+          onValueChange={(nextChoices) => {
+            if (nextChoices.length <= tieBreak.slots) setChoices(nextChoices);
+          }}
+        >
+          {candidates.map((candidate) => (
+            <ToggleGroupItem
+              key={candidate.id}
+              value={candidate.id}
+              className="h-auto w-full justify-between px-4 py-3"
+            >
+              <span className="min-w-0 text-left">
+                <span className="block font-medium">{candidate.title}</span>
+                <span className="text-muted-foreground block text-xs">
+                  {candidate.authorName} · {candidate.votes ?? 0} {t("pitches.participantVotes")}
+                </span>
+              </span>
+              <Badge variant="outline">
+                {totals.get(candidate.id) ?? 0} {t("pitches.coachVotes")}
+              </Badge>
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </CardContent>
+      <CardFooter className="flex-wrap justify-end gap-2">
+        <Button
+          variant="outline"
+          disabled={!canVote || !ready || vote.isPending}
+          onClick={() => vote.mutate()}
+        >
+          {vote.isPending ? <Spinner data-icon="inline-start" /> : <Vote data-icon="inline-start" />}
+          {t("pitches.tieSaveVote")}
+        </Button>
+        <Button disabled={count < 1 || finalize.isPending} onClick={() => finalize.mutate()}>
+          {finalize.isPending ? (
+            <Spinner data-icon="inline-start" />
+          ) : (
+            <Rocket data-icon="inline-start" />
+          )}
+          {t("pitches.tieFinalize")}
+        </Button>
       </CardFooter>
     </Card>
   );

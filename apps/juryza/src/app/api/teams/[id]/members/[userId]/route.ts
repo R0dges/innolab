@@ -1,9 +1,11 @@
 import { and, asc, eq } from "drizzle-orm";
+import { z } from "zod";
 
 import { db, team, teamMember } from "@/lib/db";
+import { innolabRosterChangesRequireCoach } from "@/lib/innolab";
 import { submissionsAreOpen } from "@/lib/phase";
 import { audit } from "@/lib/server/audit";
-import { canManage, findEvent } from "@/lib/server/events";
+import { canManage, findEvent, isPanelJudge } from "@/lib/server/events";
 import { badRequest, forbidden, handle, notFound } from "@/lib/server/http";
 import { requireUser } from "@/lib/server/identity";
 
@@ -30,21 +32,26 @@ export const DELETE = handle<{ id: string; userId: string }>(
     const target = members.find((m) => m.userId === userId);
     if (!target) throw notFound("That person is not on this team");
 
-    const manager = canManage(me, e);
+    const coach = (await isPanelJudge(e.id, me.userId)) || canManage(me, e);
+    const afterCutoff = innolabRosterChangesRequireCoach(e);
+    const body = z
+      .object({ reason: z.string().trim().min(3).max(500).optional() })
+      .parse(await req.json().catch(() => ({})));
     const self = userId === me.userId;
-    if (e.workflow === "innolab" && target.role === "owner") {
-      throw forbidden(
-        "Le responsable initial reste responsable du projet pendant tout l’événement Innovation Lab"
-      );
+    if (e.workflow === "innolab" && afterCutoff && !coach) {
+      throw forbidden("Après mardi 23h59, un changement de groupe doit passer par un coach");
     }
-    if (!self && mine?.role !== "owner" && !manager)
+    if (e.workflow === "innolab" && afterCutoff && !body.reason) {
+      throw badRequest("Le motif du changement est obligatoire après mardi 23h59");
+    }
+    if (!self && mine?.role !== "owner" && !coach)
       throw forbidden("Only the team owner can remove members");
-    if (!manager && !submissionsAreOpen(e))
+    if (!coach && !submissionsAreOpen(e))
       throw forbidden("Team rosters are locked after the deadline");
 
     const remaining = members.filter((m) => m.userId !== userId);
     if (remaining.length === 0) {
-      if (!self && !manager) throw badRequest("Cannot remove the last member");
+      if (!self && !coach) throw badRequest("Cannot remove the last member");
       await db.delete(team).where(eq(team.id, teamId));
       await audit({ eventId: e.id, actor: me, action: "team.disbanded", target: teamId, req });
       return { ok: true, disbanded: true };
@@ -67,7 +74,7 @@ export const DELETE = handle<{ id: string; userId: string }>(
       actor: me,
       action: self ? "team.left" : "team.member_removed",
       target: teamId,
-      detail: { userId },
+      detail: { userId, reason: body.reason ?? null, afterCutoff },
       req,
     });
     return { ok: true, disbanded: false };

@@ -9,8 +9,16 @@ describe("default Innovation Lab rubric", () => {
       "relevance_coherence",
       "feasibility",
       "solution_clarity",
-      "support_quality",
+      "identity",
       "oral_presentation",
+    ]);
+    expect(DEFAULT_RUBRIC.map((criterion) => criterion.label)).toEqual([
+      "Alignement stratégique",
+      "Pertinence & cohérence",
+      "Faisabilité",
+      "Solution claire",
+      "Identité",
+      "Restitution orale",
     ]);
   });
 

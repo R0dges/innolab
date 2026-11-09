@@ -104,8 +104,9 @@ export default function GuidePage() {
             link will not work for another account.
           </Step>
           <Step index={2} title="Open your queue">
-            Your assignments appear in Judging. If you are limited to certain tracks, you only
-            receive projects from those tracks, and never a project from a team you belong to.
+            Your assignments appear in Judging. You only receive projects assigned to you, and never
+            a project from a team you belong to. From the jury panel, you may also invite another
+            judge.
           </Step>
           <Step index={3} title="Score against the rubric">
             Give an integer 1–5 for every criterion. Partial scores are refused; the weighted
@@ -135,13 +136,13 @@ export default function GuidePage() {
         <Prose>Set up the event, run judging, and publish results.</Prose>
         <Steps>
           <Step index={1} title="Create the event">
-            Set the name, dates, tracks, prizes and the weighted rubric. Draft events are visible
-            only to you until you publish.
+            Set the name, dates, prizes and the weighted rubric. Draft events are visible only to
+            you until you publish.
           </Step>
           <Step index={2} title="Build the judging panel">
-            Invite judges by email and optionally limit each to tracks. Then generate assignments —
-            balanced (every project gets the same number of reviews) or batch (contiguous chunks per
-            judge), with a dry-run preview.
+            Invite judges by email. Judges already on the panel may invite additional judges. Then
+            generate assignments — balanced (every project gets the same number of reviews) or batch
+            (contiguous chunks per judge), with a dry-run preview.
           </Step>
           <Step index={3} title="Configure community voting">
             Optionally open a public vote. Choose the access mode and strength — see the{" "}

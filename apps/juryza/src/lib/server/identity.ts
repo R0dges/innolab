@@ -27,6 +27,7 @@ export interface Identity {
   name: string;
   username: string | null;
   image: string | null;
+  location: string | null;
 }
 
 export const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
@@ -38,6 +39,7 @@ const identityColumns = {
   name: userTable.name,
   username: userTable.username,
   image: userTable.image,
+  location: userTable.location,
   banned: userTable.banned,
 };
 

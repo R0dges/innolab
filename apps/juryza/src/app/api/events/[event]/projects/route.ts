@@ -4,11 +4,12 @@ import { comment, db, project, team, track } from "@/lib/db";
 import { id } from "@/lib/ids";
 import { isInnolab } from "@/lib/innolab";
 import { submissionsAreOpen } from "@/lib/phase";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { docToText } from "@/lib/rich-text";
 import { audit } from "@/lib/server/audit";
-import { loadEvent, teamOf } from "@/lib/server/events";
-import { conflict, created, forbidden, handle, readBody } from "@/lib/server/http";
-import { requireUser, resolveIdentity } from "@/lib/server/identity";
+import { loadEvent, teamOf, viewerForEvent } from "@/lib/server/events";
+import { badRequest, conflict, created, forbidden, handle, readBody } from "@/lib/server/http";
+import { requireUser } from "@/lib/server/identity";
 import { projectInput } from "@/lib/server/schemas";
 import { dispatch } from "@/lib/server/webhooks";
 
@@ -24,7 +25,12 @@ type P = { event: string };
  */
 
 export const GET = handle<P>(async (req, { event: ref }) => {
-  const e = await loadEvent(ref, await resolveIdentity(req));
+  const me = await requireUser(req);
+  const e = await loadEvent(ref, me);
+  const viewer = await viewerForEvent(e, me);
+  if (!viewer?.registered && !viewer?.isJudge && !viewer?.canManage) {
+    throw forbidden("Les projets sont réservés aux participants et coachs de cet événement");
+  }
   const url = new URL(req.url);
   const q = url.searchParams.get("q")?.trim();
   const trackId = url.searchParams.get("track")?.trim();
@@ -32,6 +38,7 @@ export const GET = handle<P>(async (req, { event: ref }) => {
   const sort = url.searchParams.get("sort");
 
   const filters = [eq(project.eventId, e.id), eq(project.status, "submitted")];
+  if (trackId && !EVENT_TRACKS_ENABLED) throw badRequest("Les filtres par axe sont désactivés");
   if (trackId) filters.push(eq(project.trackId, trackId));
   if (tag) filters.push(sql`${project.techTags} ? ${tag}`);
   if (q) {
@@ -57,7 +64,7 @@ export const GET = handle<P>(async (req, { event: ref }) => {
       trackId: project.trackId,
       trackName: track.name,
       teamId: project.teamId,
-      teamName: team.name,
+      teamName: project.title,
       submittedAt: project.submittedAt,
       comments: sql<number>`(select count(*)::int from ${comment} where ${comment.projectId} = ${project.id})`,
     })
@@ -68,7 +75,14 @@ export const GET = handle<P>(async (req, { event: ref }) => {
     .orderBy(sort === "title" ? project.title : desc(project.submittedAt))
     .limit(500);
 
-  return { event: { id: e.id, slug: e.slug, name: e.name }, count: rows.length, projects: rows };
+  const visibleRows = EVENT_TRACKS_ENABLED
+    ? rows
+    : rows.map((row) => ({ ...row, trackId: null, trackName: null }));
+  return {
+    event: { id: e.id, slug: e.slug, name: e.name },
+    count: visibleRows.length,
+    projects: visibleRows,
+  };
 });
 
 export const POST = handle<P>(async (req, { event: ref }) => {
@@ -95,6 +109,7 @@ export const POST = handle<P>(async (req, { event: ref }) => {
   if (existing) throw conflict("Your team already has a project for this event");
 
   const b = await readBody(req, projectInput);
+  if (!EVENT_TRACKS_ENABLED && b.trackId) throw badRequest("Les axes sont désactivés");
   const submit = b.submit === true;
 
   const projectId = id.project();
@@ -102,7 +117,7 @@ export const POST = handle<P>(async (req, { event: ref }) => {
     id: projectId,
     eventId: e.id,
     teamId: myTeam.id,
-    trackId: b.trackId ?? null,
+    trackId: EVENT_TRACKS_ENABLED ? (b.trackId ?? null) : null,
     title: b.title,
     tagline: b.tagline ?? null,
     content: b.content ?? null,

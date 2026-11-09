@@ -95,8 +95,25 @@ export interface EventDashboard extends EventDetail {
   ideas: DashboardIdea[];
   selectedProjects: DashboardProject[];
   audit: Json<EventDocument> | null;
+  assistant: { url: string } | null;
   resources: Json<EventResource>[];
   schedule: Json<ScheduleItem>[];
+  wallOfFame: null | {
+    project: {
+      id: string;
+      title: string;
+      tagline: string | null;
+      thumbnailUrl: string | null;
+      teamName: string | null;
+    };
+    members: {
+      id: string;
+      name: string;
+      username: string | null;
+      image: string | null;
+      headline: string | null;
+    }[];
+  };
 }
 
 export const eventKey = (slug: string) => ["event", slug] as const;

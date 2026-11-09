@@ -1,21 +1,13 @@
 import { and, asc, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 
-import {
-  db,
-  pitch,
-  project,
-  projectJoinRequest,
-  registration,
-  teamMember,
-  user as userTable,
-} from "@/lib/db";
+import { db, pitch, project, projectJoinRequest, registration, user as userTable } from "@/lib/db";
 import { id } from "@/lib/ids";
 import { innolabProjectFormationIsOpen, isInnolab } from "@/lib/innolab";
 import { audit } from "@/lib/server/audit";
 import { canManage, findEvent, isPanelJudge, teamOf } from "@/lib/server/events";
 import { conflict, forbidden, handle, notFound, readBody } from "@/lib/server/http";
-import { requireUser, type Identity } from "@/lib/server/identity";
+import { type Identity, requireUser } from "@/lib/server/identity";
 import { findTeam, joinTeam, memberCount } from "@/lib/server/teams";
 import { dispatch } from "@/lib/server/webhooks";
 
@@ -53,24 +45,16 @@ async function context(teamId: string) {
   return { target, event, selectedProject };
 }
 
-async function canReview(teamId: string, eventId: string, me: Identity) {
-  const [[membership], coach, event] = await Promise.all([
-    db
-      .select({ role: teamMember.role })
-      .from(teamMember)
-      .where(and(eq(teamMember.teamId, teamId), eq(teamMember.userId, me.userId)))
-      .limit(1),
-    isPanelJudge(eventId, me.userId),
-    findEvent(eventId),
-  ]);
-  return membership?.role === "owner" || coach || Boolean(event && canManage(me, event));
+async function canReview(eventId: string, me: Identity) {
+  const [coach, event] = await Promise.all([isPanelJudge(eventId, me.userId), findEvent(eventId)]);
+  return coach || Boolean(event && canManage(me, event));
 }
 
 export const GET = handle<P>(async (req, { id: teamId }) => {
   const me = await requireUser(req);
   const { event, selectedProject } = await context(teamId);
-  if (!(await canReview(teamId, event.id, me))) {
-    throw forbidden("Only the project owner or an event coach can review requests");
+  if (!(await canReview(event.id, me))) {
+    throw forbidden("Seul un coach rattaché à l'événement peut traiter les demandes");
   }
 
   const requests = await db
@@ -186,8 +170,8 @@ const decisionBody = z.object({
 export const PATCH = handle<P>(async (req, { id: teamId }) => {
   const me = await requireUser(req);
   const { event, selectedProject } = await context(teamId);
-  if (!(await canReview(teamId, event.id, me))) {
-    throw forbidden("Only the project owner or an event coach can review requests");
+  if (!(await canReview(event.id, me))) {
+    throw forbidden("Seul un coach rattaché à l'événement peut traiter les demandes");
   }
   if (!innolabProjectFormationIsOpen(event)) {
     throw forbidden("Project registration is closed for this event");

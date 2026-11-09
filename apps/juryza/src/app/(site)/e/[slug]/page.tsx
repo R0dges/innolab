@@ -66,6 +66,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -89,8 +90,8 @@ import { useI18n } from "@/components/locale-provider";
 import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/lib/api";
 import { formatDate, pluralize, relativeTime } from "@/lib/format";
-import { eventRegistrationIsOpen } from "@/lib/innolab";
 import type { TranslationKey } from "@/lib/i18n";
+import { eventRegistrationIsOpen } from "@/lib/innolab";
 import { hasVoting, phaseOf, submissionsAreOpen } from "@/lib/phase";
 import { type EventDashboard, type EventDetail, eventKey, useEventDashboard } from "@/lib/queries";
 import { docToText, isEmptyDoc, parseRichDoc } from "@/lib/rich-text";
@@ -139,6 +140,7 @@ export default function EventOverviewPage() {
   return (
     <div className="flex flex-col gap-8">
       <PhaseFocus slug={slug} data={data} />
+      {data.wallOfFame && <WallOfFame slug={slug} wall={data.wallOfFame} />}
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-10">
         <div className="flex min-w-0 flex-col gap-8">
@@ -149,15 +151,16 @@ export default function EventOverviewPage() {
             <RichContent
               doc={e.content}
               empty={
-                <p className="text-muted-foreground">
-                  {e.description || t("event.noOverview")}
-                </p>
+                <p className="text-muted-foreground">{e.description || t("event.noOverview")}</p>
               }
             />
           </section>
 
           {(data.viewer?.registered || data.viewer?.isJudge || data.viewer?.canManage) && (
-            <AuditAndResources slug={slug} data={data} />
+            <>
+              <EventAssistant slug={slug} data={data} />
+              <AuditAndResources slug={slug} data={data} />
+            </>
           )}
 
           {e.workflow === "innolab" && <InnolabJourney slug={slug} data={data} />}
@@ -210,6 +213,86 @@ export default function EventOverviewPage() {
 /* ------------------------------------------------------------------ */
 /* Main column                                                        */
 /* ------------------------------------------------------------------ */
+
+function WallOfFame({
+  slug,
+  wall,
+}: {
+  slug: string;
+  wall: NonNullable<EventDashboard["wallOfFame"]>;
+}) {
+  return (
+    <section aria-labelledby="wall-of-fame-title">
+      <Card className="border-primary/25 bg-primary/5 overflow-hidden">
+        <CardContent className="grid gap-6 py-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+          <div className="flex min-w-0 items-start gap-4">
+            <span className="bg-primary text-primary-foreground grid size-12 shrink-0 place-items-center rounded-xl">
+              <Trophy className="size-6" />
+            </span>
+            <div className="flex min-w-0 flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge>Wall of Fame</Badge>
+                <span className="text-muted-foreground text-sm">Projet classé premier</span>
+              </div>
+              <div>
+                <h2 id="wall-of-fame-title" className="text-xl font-semibold tracking-tight">
+                  {wall.project.title}
+                </h2>
+                <p className="text-muted-foreground text-sm">
+                  {wall.project.teamName ?? "Équipe gagnante"}
+                  {wall.project.tagline ? ` — ${wall.project.tagline}` : ""}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="self-start"
+                nativeButton={false}
+                render={<Link href={`/e/${slug}/projects/${wall.project.id}`} />}
+              >
+                Voir le projet gagnant <ArrowRight data-icon="inline-end" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 md:items-end">
+            <p className="text-muted-foreground text-xs font-medium">L’équipe à l’honneur</p>
+            <div className="flex flex-wrap gap-3">
+              {wall.members.map((member) => {
+                const portrait = (
+                  <span
+                    key={member.id}
+                    className="flex w-16 flex-col items-center gap-1.5 text-center"
+                  >
+                    <UserAvatar
+                      name={member.name}
+                      image={member.image}
+                      className="ring-background size-12 ring-2"
+                    />
+                    <span className="line-clamp-2 text-xs leading-tight font-medium">
+                      {member.name}
+                    </span>
+                  </span>
+                );
+                return member.username ? (
+                  <Link
+                    key={member.id}
+                    href={`/u/${member.username}`}
+                    className="rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                  >
+                    {portrait}
+                  </Link>
+                ) : (
+                  <span key={member.id}>{portrait}</span>
+                );
+              })}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
 
 const PHASE_FOCUS_KEYS = {
   upcoming: {
@@ -315,6 +398,124 @@ const ACCESS_LABEL: Record<string, string> = {
   event: "Participants & coaches",
   restricted: "Restricted",
 };
+
+function EventAssistant({ slug, data }: { slug: string; data: EventDashboard }) {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [url, setUrl] = useState(data.assistant?.url ?? "");
+  const canConfigure = Boolean(data.viewer?.isJudge || data.viewer?.canManage);
+
+  const save = useMutation({
+    mutationFn: (nextUrl: string | null) =>
+      api.patch<{ assistant: { url: string } | null }>(`/api/events/${slug}/assistant`, {
+        url: nextUrl,
+      }),
+    onSuccess: async (_result, nextUrl) => {
+      toast.success(
+        nextUrl ? t("event.assistant.saved") : t("event.assistant.removed")
+      );
+      await queryClient.invalidateQueries({ queryKey: eventKey(slug) });
+      setDialogOpen(false);
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  if (!data.assistant && !canConfigure) return null;
+
+  function changeDialogOpen(open: boolean) {
+    setDialogOpen(open);
+    if (open) setUrl(data.assistant?.url ?? "");
+  }
+
+  return (
+    <Card className="border-primary/25 bg-primary/5">
+      <CardContent className="grid gap-5 py-1 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="bg-primary text-primary-foreground grid size-10 shrink-0 place-items-center rounded-xl">
+            <Sparkles className="size-5" />
+          </span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <h2 className="font-semibold tracking-tight">{t("event.assistant.title")}</h2>
+            <p className="text-muted-foreground text-sm">
+              {data.assistant
+                ? t("event.assistant.description")
+                : t("event.assistant.missing")}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 md:justify-end">
+          {data.assistant && (
+            <Button
+              nativeButton={false}
+              render={<a href={data.assistant.url} target="_blank" rel="noreferrer" />}
+            >
+              {t("event.assistant.open")} <ExternalLink data-icon="inline-end" />
+            </Button>
+          )}
+          {canConfigure && (
+            <Dialog open={dialogOpen} onOpenChange={changeDialogOpen}>
+              <DialogTrigger
+                render={<Button variant={data.assistant ? "outline" : "default"} />}
+              >
+                <Settings2 data-icon="inline-start" />
+                {t(data.assistant ? "event.assistant.edit" : "event.assistant.configure")}
+              </DialogTrigger>
+              <DialogContent>
+                <form
+                  className="flex flex-col gap-5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    save.mutate(url.trim() || null);
+                  }}
+                >
+                  <DialogHeader>
+                    <DialogTitle>{t("event.assistant.dialogTitle")}</DialogTitle>
+                    <DialogDescription>{t("event.assistant.dialogHint")}</DialogDescription>
+                  </DialogHeader>
+                  <div className="flex flex-col gap-2">
+                    <label htmlFor="event-assistant-url" className="text-sm font-medium">
+                      {t("event.assistant.url")}
+                    </label>
+                    <Input
+                      id="event-assistant-url"
+                      type="url"
+                      inputMode="url"
+                      value={url}
+                      onChange={(event) => setUrl(event.target.value)}
+                      placeholder={t("event.assistant.urlPlaceholder")}
+                      maxLength={2048}
+                      required
+                    />
+                  </div>
+                  <DialogFooter className="sm:justify-between">
+                    {data.assistant ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => save.mutate(null)}
+                        disabled={save.isPending}
+                      >
+                        {t("event.assistant.remove")}
+                      </Button>
+                    ) : (
+                      <span />
+                    )}
+                    <Button type="submit" disabled={save.isPending || !url.trim()}>
+                      {save.isPending ? <Spinner /> : <Sparkles />}
+                      {t("event.assistant.save")}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function AuditAndResources({ slug, data }: { slug: string; data: EventDashboard }) {
   const audit = data.audit;
@@ -782,7 +983,8 @@ function InnolabJourney({ slug, data }: { slug: string; data: EventDashboard }) 
     onError: (err) => toast.error(err.message),
   });
   const cancelJoinRequest = useMutation({
-    mutationFn: (teamId: string) => api.delete<{ status: "cancelled" }>(`/api/teams/${teamId}/join`),
+    mutationFn: (teamId: string) =>
+      api.delete<{ status: "cancelled" }>(`/api/teams/${teamId}/join`),
     onSuccess: (_result, teamId) => {
       toast.success(t("journey.requestCancelled"));
       queryClient.invalidateQueries({ queryKey: eventKey(slug) });
@@ -843,10 +1045,7 @@ function InnolabJourney({ slug, data }: { slug: string; data: EventDashboard }) 
 
   return (
     <section className="flex flex-col gap-3">
-      <SectionTitle
-        icon={Rocket}
-        hint={String(data.selectedProjects.length)}
-      >
+      <SectionTitle icon={Rocket} hint={String(data.selectedProjects.length)}>
         {t("journey.selectedProjects")}
       </SectionTitle>
       {data.selectedProjects.length ? (
@@ -1279,9 +1478,7 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
     if (!v) {
       body = (
         <>
-          <p className="text-muted-foreground text-sm">
-            {translate("event.signInToParticipate")}
-          </p>
+          <p className="text-muted-foreground text-sm">{translate("event.signInToParticipate")}</p>
           <Button nativeButton={false} render={<Link href={`/login?next=${next}`} />}>
             <LogIn /> {translate("site.signIn")}
           </Button>
@@ -1316,9 +1513,7 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
     } else if (!v.registered && eventRegistrationIsOpen(e)) {
       body = (
         <>
-          <p className="text-muted-foreground text-sm">
-            {translate("event.registerHint")}
-          </p>
+          <p className="text-muted-foreground text-sm">{translate("event.registerHint")}</p>
           <Button onClick={() => register.mutate()} disabled={register.isPending}>
             {register.isPending ? <Spinner /> : <Check />} {translate("event.register")}
           </Button>
@@ -1332,9 +1527,7 @@ function Participation({ slug, data }: { slug: string; data: EventDetail }) {
               <Check className="size-4" /> {translate("event.registered")}
             </div>
           )}
-          <p className="text-muted-foreground text-sm">
-            {translate("event.boardHint")}
-          </p>
+          <p className="text-muted-foreground text-sm">{translate("event.boardHint")}</p>
           <Button nativeButton={false} render={<Link href={`/e/${slug}/pitches`} />}>
             <Lightbulb /> {translate("event.openPitches")}
           </Button>

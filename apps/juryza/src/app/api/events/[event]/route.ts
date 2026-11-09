@@ -1,4 +1,4 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import {
   db,
@@ -12,15 +12,15 @@ import {
   track,
   user as userTable,
 } from "@/lib/db";
+import { EVENT_REWARDS_ENABLED, EVENT_TRACKS_ENABLED, INTERNAL_INNOLAB_ONLY } from "@/lib/platform";
 import { docToText } from "@/lib/rich-text";
-import { INTERNAL_INNOLAB_ONLY } from "@/lib/platform";
 import { announcementsForEvent } from "@/lib/server/announcements";
 import { audit } from "@/lib/server/audit";
 import { loadEvent, loadManagedEvent, viewerForEvent } from "@/lib/server/events";
-import { badRequest, conflict, handle, readBody } from "@/lib/server/http";
+import { badRequest, conflict, forbidden, handle, readBody } from "@/lib/server/http";
 import { requireUser, resolveIdentity } from "@/lib/server/identity";
 import { eventPatch } from "@/lib/server/schemas";
-import { innolabScheduleIssue, toDate } from "@/lib/server/validation";
+import { innolabScheduleIssue, judgingScheduleIssue, toDate } from "@/lib/server/validation";
 import { dispatch } from "@/lib/server/webhooks";
 
 type P = { event: string };
@@ -40,7 +40,9 @@ export const GET = handle<P>(async (req, { event: ref }) => {
 
   const [viewer, tracks, prizes, criteria, judges, [counts]] = await Promise.all([
     viewerPromise,
-    db.select().from(track).where(eq(track.eventId, e.id)).orderBy(asc(track.position)),
+    EVENT_TRACKS_ENABLED
+      ? db.select().from(track).where(eq(track.eventId, e.id)).orderBy(asc(track.position))
+      : Promise.resolve([]),
     db
       .select()
       .from(prize)
@@ -74,7 +76,21 @@ export const GET = handle<P>(async (req, { event: ref }) => {
   ]);
   const announcements = await announcementsForEvent(e.id, viewer, 5);
 
-  return { event: e, tracks, prizes, criteria, judges, announcements, counts, viewer };
+  const visiblePrizes = EVENT_REWARDS_ENABLED
+    ? EVENT_TRACKS_ENABLED
+      ? prizes
+      : prizes.filter((entry) => entry.kind !== "track")
+    : [];
+  return {
+    event: e,
+    tracks,
+    prizes: visiblePrizes,
+    criteria,
+    judges,
+    announcements,
+    counts,
+    viewer,
+  };
 });
 
 export const PATCH = handle<P>(async (req, { event: ref }) => {
@@ -89,6 +105,8 @@ export const PATCH = handle<P>(async (req, { event: ref }) => {
   }
   const scheduleIssue = innolabScheduleIssue({ ...e, ...b });
   if (scheduleIssue) throw badRequest(scheduleIssue);
+  const judgingIssue = judgingScheduleIssue({ ...e, ...b });
+  if (judgingIssue) throw badRequest(judgingIssue);
 
   if (b.slug && b.slug !== e.slug) {
     const [taken] = await db
@@ -98,10 +116,14 @@ export const PATCH = handle<P>(async (req, { event: ref }) => {
       .limit(1);
     if (taken) throw conflict("That URL is already taken — choose another slug");
   }
+  if (e.activatedAt && b.location !== undefined && b.location !== e.location) {
+    throw conflict("Le lieu d'un événement actif ne peut pas être modifié");
+  }
 
   const {
     submissionsOpen,
     submissionsClose,
+    judgingOpen,
     judgingClose,
     votingOpen,
     votingClose,
@@ -112,30 +134,91 @@ export const PATCH = handle<P>(async (req, { event: ref }) => {
     pitchVotingClose,
     ...rest
   } = b;
-  await db
-    .update(event)
-    .set({
-      ...rest,
-      ...(b.content !== undefined && { description: docToText(b.content, 500) || e.tagline }),
-      ...(submissionsOpen !== undefined && { submissionsOpen: toDate(submissionsOpen) }),
-      ...(submissionsClose !== undefined && { submissionsClose: new Date(submissionsClose) }),
-      ...(judgingClose !== undefined && { judgingClose: toDate(judgingClose) }),
-      ...(votingOpen !== undefined && { votingOpen: toDate(votingOpen) }),
-      ...(votingClose !== undefined && { votingClose: toDate(votingClose) }),
-      ...(votingElectorateLockAt !== undefined && {
-        votingElectorateLockAt: toDate(votingElectorateLockAt),
-      }),
-      ...(pitchSubmissionsOpen !== undefined && {
-        pitchSubmissionsOpen: toDate(pitchSubmissionsOpen),
-      }),
-      ...(pitchSubmissionsClose !== undefined && {
-        pitchSubmissionsClose: toDate(pitchSubmissionsClose),
-      }),
-      ...(pitchVotingOpen !== undefined && { pitchVotingOpen: toDate(pitchVotingOpen) }),
-      ...(pitchVotingClose !== undefined && { pitchVotingClose: toDate(pitchVotingClose) }),
-      updatedAt: new Date(),
-    })
-    .where(eq(event.id, e.id));
+  const activating = b.visibility === "published" && !e.activatedAt;
+  const eventLocation = b.location ?? e.location ?? me.location;
+  if (activating && !eventLocation) {
+    throw badRequest("Un lieu est obligatoire pour activer un événement Innovation Lab");
+  }
+  await db.transaction(async (tx) => {
+    if (activating && eventLocation) {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`active-event:${eventLocation}`}))`
+      );
+      const [active] = await tx
+        .select({ id: event.id, name: event.name, creator: userTable.name })
+        .from(event)
+        .leftJoin(userTable, eq(userTable.id, event.createdBy))
+        .where(
+          and(
+            eq(event.location, eventLocation),
+            eq(event.visibility, "published"),
+            sql`${event.activatedAt} is not null`,
+            sql`${event.cancelledAt} is null`,
+            sql`${event.archivedAt} is null`
+          )
+        )
+        .limit(1);
+      if (active && active.id !== e.id) {
+        throw conflict(
+          `Un événement est déjà actif à ${eventLocation} : "${active.name}", créé par ${active.creator ?? "un coach"}.`
+        );
+      }
+    }
+
+    await tx
+      .update(event)
+      .set({
+        ...rest,
+        ...(activating && { location: eventLocation, activatedAt: new Date() }),
+        ...(b.content !== undefined && { description: docToText(b.content, 500) || e.tagline }),
+        ...(submissionsOpen !== undefined && { submissionsOpen: toDate(submissionsOpen) }),
+        ...(submissionsClose !== undefined && { submissionsClose: new Date(submissionsClose) }),
+        ...(judgingOpen !== undefined && { judgingOpen: toDate(judgingOpen) }),
+        ...(judgingClose !== undefined && { judgingClose: toDate(judgingClose) }),
+        ...(votingOpen !== undefined && { votingOpen: toDate(votingOpen) }),
+        ...(votingClose !== undefined && { votingClose: toDate(votingClose) }),
+        ...(votingElectorateLockAt !== undefined && {
+          votingElectorateLockAt: toDate(votingElectorateLockAt),
+        }),
+        ...(pitchSubmissionsOpen !== undefined && {
+          pitchSubmissionsOpen: toDate(pitchSubmissionsOpen),
+        }),
+        ...(pitchSubmissionsClose !== undefined && {
+          pitchSubmissionsClose: toDate(pitchSubmissionsClose),
+        }),
+        ...(pitchVotingOpen !== undefined && { pitchVotingOpen: toDate(pitchVotingOpen) }),
+        ...(pitchVotingClose !== undefined && { pitchVotingClose: toDate(pitchVotingClose) }),
+        updatedAt: new Date(),
+      })
+      .where(eq(event.id, e.id));
+
+    if (activating && eventLocation) {
+      const accounts = await tx
+        .select({ id: userTable.id, role: userTable.role })
+        .from(userTable)
+        .where(
+          and(
+            eq(userTable.location, eventLocation),
+            eq(userTable.banned, false),
+            inArray(userTable.role, ["participant", "judge", "organizer"])
+          )
+        );
+      const participants = accounts.filter((account) => account.role === "participant");
+      const coaches = accounts.filter((account) => ["judge", "organizer"].includes(account.role));
+      if (participants.length) {
+        await tx
+          .insert(registration)
+          .values(participants.map((account) => ({ eventId: e.id, userId: account.id })))
+          .onConflictDoNothing();
+      }
+      if (coaches.length) {
+        await tx
+          .insert(eventJudge)
+          .values(coaches.map((account) => ({ eventId: e.id, userId: account.id })))
+          .onConflictDoNothing();
+      }
+    }
+  });
 
   await audit({
     eventId: e.id,
@@ -152,6 +235,7 @@ export const PATCH = handle<P>(async (req, { event: ref }) => {
 
 export const DELETE = handle<P>(async (req, { event: ref }) => {
   const me = await requireUser(req);
+  if (me.role !== "admin") throw forbidden("Seul un administrateur peut supprimer un événement");
   const e = await loadManagedEvent(ref, me);
   await db.delete(event).where(eq(event.id, e.id));
   await audit({ actor: me, action: "event.deleted", target: e.id, detail: { name: e.name }, req });

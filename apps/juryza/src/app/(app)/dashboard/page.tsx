@@ -57,9 +57,12 @@ export default function DashboardPage() {
   const now = Date.now();
   const toReview =
     data?.judging.reduce((n, j) => {
+      const opens = j.judgingOpen
+        ? new Date(j.judgingOpen).getTime()
+        : new Date(j.submissionsClose).getTime();
       const closes = j.judgingClose ? new Date(j.judgingClose).getTime() : null;
       const locked = Boolean(j.resultsPublished) || (closes !== null && closes <= now);
-      if (locked) return n;
+      if (locked || opens > now) return n;
       return n + Math.max(0, j.assigned - j.scored);
     }, 0) ?? 0;
   const firstName = viewer?.name.split(" ")[0] ?? "vous";
@@ -121,14 +124,21 @@ export default function DashboardPage() {
         <div className="grid gap-8 xl:grid-cols-[1fr_380px]">
           <div className="flex flex-col gap-8">
             {data && data.judging.length > 0 && (
-              <Section title="Évaluations" description="Tous les projets à évaluer en tant que coach.">
+              <Section
+                title="Évaluations"
+                description="Tous les projets à évaluer en tant que coach."
+              >
                 <div className="grid gap-3 md:grid-cols-2">
                   {data.judging.map((j) => {
                     const done = Math.min(j.scored, j.assigned);
                     const pct = j.assigned ? Math.round((done / j.assigned) * 100) : 0;
+                    const opens = j.judgingOpen
+                      ? new Date(j.judgingOpen).getTime()
+                      : new Date(j.submissionsClose).getTime();
                     const closes = j.judgingClose ? new Date(j.judgingClose).getTime() : null;
                     const locked =
                       Boolean(j.resultsPublished) || (closes !== null && closes <= now);
+                    const upcoming = !locked && opens > now;
                     const complete = j.assigned > 0 && done >= j.assigned;
                     return (
                       <Card key={j.id} className="gap-3">
@@ -139,6 +149,10 @@ export default function DashboardPage() {
                               <Badge variant="secondary" className="gap-1 shrink-0">
                                 <Lock className="size-3" />
                                 {j.resultsPublished ? "Résultats publiés" : "Évaluations closes"}
+                              </Badge>
+                            ) : upcoming ? (
+                              <Badge variant="outline" className="gap-1 shrink-0">
+                                Ouverture {relativeTime(opens, now)}
                               </Badge>
                             ) : complete ? (
                               <Badge className="gap-1 shrink-0">
@@ -160,7 +174,7 @@ export default function DashboardPage() {
                           >
                             {j.assigned === 0
                               ? "Ouvrir l’évaluation"
-                              : complete || locked
+                              : complete || locked || upcoming
                                 ? "Consulter les notes"
                                 : j.scored === 0
                                   ? "Commencer"

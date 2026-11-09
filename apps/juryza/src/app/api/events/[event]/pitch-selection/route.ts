@@ -1,7 +1,16 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { db, event as eventTable, pitch, pitchVote, project, team, teamMember } from "@/lib/db";
+import {
+  db,
+  event as eventTable,
+  pitch,
+  pitchTieBreakVote,
+  pitchVote,
+  project,
+  team,
+  teamMember,
+} from "@/lib/db";
 import { id, secretToken } from "@/lib/ids";
 import { isInnolab, pitchVotingHasClosed } from "@/lib/innolab";
 import { textToDoc } from "@/lib/rich-text";
@@ -25,8 +34,9 @@ export const POST = handle<{ event: string }>(async (req, { event: ref }) => {
   if (!current.pitchPresentationOpenedAt) {
     throw forbidden("Open the pitch presentation session before finalizing projects");
   }
-  if (!pitchVotingHasClosed(current))
+  if (!pitchVotingHasClosed(current)) {
     throw forbidden("Close pitch voting before selecting projects");
+  }
   if (current.pitchSelectionFinalizedAt) {
     throw conflict("The project selection has already been finalized");
   }
@@ -37,19 +47,28 @@ export const POST = handle<{ event: string }>(async (req, { event: ref }) => {
     throw badRequest(`Only ${overview.candidateCount} submitted pitches are available`);
   }
 
-  const seed = secretToken(32);
   const finalizedAt = new Date();
   const result = await db.transaction(async (tx) => {
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${`pitch-selection:${current.id}`}))`
     );
     const [selectionState] = await tx
-      .select({ finalizedAt: eventTable.pitchSelectionFinalizedAt })
+      .select({
+        finalizedAt: eventTable.pitchSelectionFinalizedAt,
+        count: eventTable.pitchSelectionCount,
+        tieBreakRound: eventTable.pitchTieBreakRound,
+        tieBreakCandidateIds: eventTable.pitchTieBreakCandidateIds,
+        tieBreakSelectedIds: eventTable.pitchTieBreakSelectedIds,
+        tieBreakSlots: eventTable.pitchTieBreakSlots,
+      })
       .from(eventTable)
       .where(eq(eventTable.id, current.id))
       .limit(1);
     if (selectionState?.finalizedAt) {
       throw conflict("The project selection has already been finalized");
+    }
+    if (selectionState?.count !== null && selectionState?.count !== body.count) {
+      throw conflict("The project count is locked while coaches resolve the tie");
     }
 
     const candidates = await tx
@@ -58,16 +77,113 @@ export const POST = handle<{ event: string }>(async (req, { event: ref }) => {
         authorId: pitch.authorId,
         title: pitch.title,
         description: pitch.description,
-        votes: sql<number>`(select count(*)::int from ${pitchVote} where ${pitchVote.pitchId} = ${pitch.id})`,
+        createdAt: pitch.createdAt,
+        votes: sql<number>`count(${pitchVote.id})::int`,
       })
       .from(pitch)
-      .where(and(eq(pitch.eventId, current.id), eq(pitch.status, "submitted")));
+      .leftJoin(pitchVote, eq(pitchVote.pitchId, pitch.id))
+      .where(and(eq(pitch.eventId, current.id), eq(pitch.status, "submitted")))
+      .groupBy(pitch.id)
+      .orderBy(asc(pitch.createdAt), asc(pitch.id));
     if (body.count > candidates.length) {
       throw badRequest(`Only ${candidates.length} submitted pitches are available`);
     }
 
-    const ranked = selectRankedPitches(candidates, body.count, seed);
-    const createdProjects = ranked.selected.map((candidate) => ({
+    const participantRanking = selectRankedPitches(candidates, body.count);
+    let tieBreakSelectedIds = selectionState?.tieBreakSelectedIds ?? [];
+    let selectedIds: string[] | null = null;
+
+    if (selectionState?.tieBreakRound) {
+      const candidateIds = selectionState.tieBreakCandidateIds;
+      const slots = selectionState.tieBreakSlots;
+      if (!slots || candidateIds.length <= slots) {
+        throw conflict("The coach tie-break state is invalid");
+      }
+
+      const voteTotals = await tx
+        .select({
+          pitchId: pitchTieBreakVote.pitchId,
+          votes: sql<number>`count(*)::int`,
+        })
+        .from(pitchTieBreakVote)
+        .where(
+          and(
+            eq(pitchTieBreakVote.eventId, current.id),
+            eq(pitchTieBreakVote.round, selectionState.tieBreakRound),
+            inArray(pitchTieBreakVote.pitchId, candidateIds)
+          )
+        )
+        .groupBy(pitchTieBreakVote.pitchId);
+      const totalsByPitch = new Map(voteTotals.map((row) => [row.pitchId, row.votes]));
+      if (voteTotals.reduce((total, row) => total + row.votes, 0) === 0) {
+        throw badRequest("At least one coach must vote before finalizing the selection");
+      }
+
+      const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+      const runoffCandidates = candidateIds.map((candidateId) => {
+        const candidate = candidatesById.get(candidateId);
+        if (!candidate) throw conflict("A tied pitch is no longer available");
+        return { ...candidate, votes: totalsByPitch.get(candidateId) ?? 0 };
+      });
+      const runoff = selectRankedPitches(runoffCandidates, slots);
+      tieBreakSelectedIds = [...tieBreakSelectedIds, ...runoff.selectedIds];
+
+      if (runoff.tieCandidateIds.length > 0) {
+        const nextRound = selectionState.tieBreakRound + 1;
+        await tx
+          .update(eventTable)
+          .set({
+            pitchTieBreakRound: nextRound,
+            pitchTieBreakCandidateIds: runoff.tieCandidateIds,
+            pitchTieBreakSelectedIds: tieBreakSelectedIds,
+            pitchTieBreakSlots: runoff.tieSlots,
+            updatedAt: finalizedAt,
+          })
+          .where(eq(eventTable.id, current.id));
+        return {
+          kind: "tie-break" as const,
+          count: body.count,
+          round: nextRound,
+          candidatePitchIds: runoff.tieCandidateIds,
+          slots: runoff.tieSlots,
+          selectedPitchIds: tieBreakSelectedIds,
+        };
+      }
+
+      selectedIds = [...participantRanking.selectedIds, ...tieBreakSelectedIds];
+    } else if (participantRanking.tieCandidateIds.length > 0) {
+      await tx
+        .update(eventTable)
+        .set({
+          pitchSelectionCount: body.count,
+          pitchSelectionSeed: null,
+          pitchTieBreakRound: 1,
+          pitchTieBreakCandidateIds: participantRanking.tieCandidateIds,
+          pitchTieBreakSelectedIds: [],
+          pitchTieBreakSlots: participantRanking.tieSlots,
+          updatedAt: finalizedAt,
+        })
+        .where(eq(eventTable.id, current.id));
+      return {
+        kind: "tie-break" as const,
+        count: body.count,
+        round: 1,
+        candidatePitchIds: participantRanking.tieCandidateIds,
+        slots: participantRanking.tieSlots,
+        selectedPitchIds: [] as string[],
+      };
+    } else {
+      selectedIds = participantRanking.selectedIds;
+    }
+
+    if (selectedIds.length !== body.count) {
+      throw conflict("The coach tie-break did not resolve every remaining place");
+    }
+    const selectedSet = new Set(selectedIds);
+    const selectedCandidates = participantRanking.ranked.filter((candidate) =>
+      selectedSet.has(candidate.id)
+    );
+    const createdProjects = selectedCandidates.map((candidate) => ({
       pitchId: candidate.id,
       authorId: candidate.authorId,
       teamId: id.team(),
@@ -84,7 +200,7 @@ export const POST = handle<{ event: string }>(async (req, { event: ref }) => {
     await tx
       .update(pitch)
       .set({ status: "selected", updatedAt: finalizedAt })
-      .where(inArray(pitch.id, ranked.selectedIds));
+      .where(inArray(pitch.id, selectedIds));
     await tx.insert(team).values(
       createdProjects.map((createdProject) => ({
         id: createdProject.teamId,
@@ -117,14 +233,49 @@ export const POST = handle<{ event: string }>(async (req, { event: ref }) => {
       .update(eventTable)
       .set({
         pitchSelectionCount: body.count,
-        pitchSelectionSeed: seed,
+        pitchSelectionSeed: null,
+        pitchTieBreakRound: null,
+        pitchTieBreakCandidateIds: [],
+        pitchTieBreakSelectedIds: tieBreakSelectedIds,
+        pitchTieBreakSlots: null,
         pitchSelectionFinalizedAt: finalizedAt,
         updatedAt: finalizedAt,
       })
       .where(eq(eventTable.id, current.id));
 
-    return { ...ranked, projects: createdProjects };
+    return {
+      kind: "finalized" as const,
+      selectedIds,
+      cutoffVotes: participantRanking.cutoffVotes,
+      projects: createdProjects,
+    };
   });
+
+  if (result.kind === "tie-break") {
+    await audit({
+      eventId: current.id,
+      actor: me,
+      action: "pitch.tie_break_opened",
+      target: current.id,
+      detail: {
+        algorithm: PITCH_SELECTION_ALGORITHM,
+        count: result.count,
+        round: result.round,
+        candidatePitchIds: result.candidatePitchIds,
+        slots: result.slots,
+        alreadySelectedPitchIds: result.selectedPitchIds,
+      },
+      req,
+    });
+    return {
+      finalized: false,
+      tieBreak: {
+        round: result.round,
+        candidatePitchIds: result.candidatePitchIds,
+        slots: result.slots,
+      },
+    };
+  }
 
   await audit({
     eventId: current.id,
@@ -133,15 +284,12 @@ export const POST = handle<{ event: string }>(async (req, { event: ref }) => {
     target: current.id,
     detail: {
       algorithm: PITCH_SELECTION_ALGORITHM,
-      seed,
       count: body.count,
       participantCount: overview.participantCount,
       recommendedMinimum: overview.recommended.minimum,
       recommendedMaximum: overview.recommended.maximum,
       selectedPitchIds: result.selectedIds,
       cutoffVotes: result.cutoffVotes,
-      tieCandidateIds: result.tieCandidateIds,
-      tieSelectedIds: result.tieSelectedIds,
       projects: result.projects.map(({ pitchId, projectId, teamId }) => ({
         pitchId,
         projectId,
@@ -159,17 +307,12 @@ export const POST = handle<{ event: string }>(async (req, { event: ref }) => {
   }
 
   return {
+    finalized: true,
     selected: result.selectedIds,
     projects: result.projects.map(({ pitchId, projectId, teamId }) => ({
       pitchId,
       projectId,
       teamId,
     })),
-    tieBreak: {
-      algorithm: PITCH_SELECTION_ALGORITHM,
-      seed,
-      candidatePitchIds: result.tieCandidateIds,
-      selectedPitchIds: result.tieSelectedIds,
-    },
   };
 });

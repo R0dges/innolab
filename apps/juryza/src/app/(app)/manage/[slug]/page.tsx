@@ -63,6 +63,7 @@ import { StatCard } from "@/components/page";
 import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/lib/api";
 import { formatNumber, relativeTime } from "@/lib/format";
+import { EVENT_REWARDS_ENABLED, EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { type EventDetail, eventKey, useEvent } from "@/lib/queries";
 import type { AuditLog, Event, Json } from "@/lib/types";
 
@@ -199,9 +200,11 @@ export default function EventOverviewPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4">
           <SubmissionsChart data={data.submissionsPerDay} total={t.submitted} />
-          <TracksChart data={data.projectsPerTrack} manageHref={`${base}/tracks`} />
+          {EVENT_TRACKS_ENABLED && (
+            <TracksChart data={data.projectsPerTrack} manageHref={`${base}/tracks`} />
+          )}
         </div>
         <NextSteps overview={data} detail={detail.data} base={base} />
       </div>
@@ -393,18 +396,26 @@ function NextSteps({
       done: e.visibility === "published",
       href: `${base}/settings`,
     },
-    {
-      label: "Add tracks",
-      hint: "Categories projects compete in",
-      done: (detail?.tracks.length ?? 0) > 0,
-      href: `${base}/tracks`,
-    },
-    {
-      label: "Set up prizes",
-      hint: "Overall, per-track or community",
-      done: (detail?.prizes.length ?? 0) > 0,
-      href: `${base}/tracks`,
-    },
+    ...(EVENT_TRACKS_ENABLED
+      ? [
+          {
+            label: "Add tracks",
+            hint: "Categories projects compete in",
+            done: (detail?.tracks.length ?? 0) > 0,
+            href: `${base}/tracks`,
+          },
+        ]
+      : []),
+    ...(EVENT_REWARDS_ENABLED
+      ? [
+          {
+            label: "Set up prizes",
+            hint: "Overall or community rewards",
+            done: (detail?.prizes.length ?? 0) > 0,
+            href: `${base}/tracks`,
+          },
+        ]
+      : []),
     {
       label: "Configure the rubric",
       hint: "Weighted scoring criteria",
@@ -437,7 +448,7 @@ function NextSteps({
     },
     {
       label: "Publish results",
-      hint: "Announce winners and issue certificates",
+      hint: "Announce the winning project and open its Wall of Fame",
       done: e.resultsPublished,
       href: `${base}/results`,
     },
@@ -609,7 +620,7 @@ const ACTION_LABEL: Record<string, string> = {
   "event.created": "created the event",
   "event.updated": "updated event details",
   "event.imported": "imported the event",
-  "tracks.updated": "updated the tracks",
+  "tracks.updated": "updated event configuration",
   "prizes.updated": "updated the prizes",
   "rubric.updated": "updated the rubric",
   "announcement.posted": "posted an announcement",
@@ -625,7 +636,7 @@ const ACTION_LABEL: Record<string, string> = {
   "judge.invite_revoked": "revoked a judge invite",
   "judge.joined": "joined the judging panel",
   "judge.removed": "removed a judge",
-  "judge.tracks_updated": "changed a judge's tracks",
+  "judge.tracks_updated": "changed a judge's assignment scope",
   "judge.scores.denied": "was denied access to scores",
   "pairwise.compared": "made a pairwise comparison",
   "project.deleted": "deleted a project",

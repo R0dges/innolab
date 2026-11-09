@@ -37,8 +37,8 @@ export const GET = handle<P>(async (req, { id: teamId }) => {
   const me = await resolveIdentity(req);
   const { t, e, role } = await context(teamId, me?.userId ?? null);
   const coach = me ? await isPanelJudge(e.id, me.userId) : false;
-  const manager = canManage(me, e);
-  const canReviewRequests = role === "owner" || coach || manager;
+  const manager = coach || canManage(me, e);
+  const canReviewRequests = coach || manager;
   const privileged = role !== null || coach || manager;
   const [members, proj] = await Promise.all([teamMembers(t.id), teamProject(t.id)]);
   return {
@@ -95,7 +95,7 @@ export const PATCH = handle<P>(async (req, { id: teamId }) => {
 export const DELETE = handle<P>(async (req, { id: teamId }) => {
   const me = await requireUser(req);
   const { t, e, role } = await context(teamId, me.userId);
-  const manager = canManage(me, e);
+  const manager = (await isPanelJudge(e.id, me.userId)) || canManage(me, e);
   if (role !== "owner" && !manager) throw forbidden("Only the team owner can disband the team");
   if (e.workflow === "innolab" && !manager) {
     throw forbidden("Seul un coach peut supprimer un groupe projet Innovation Lab");

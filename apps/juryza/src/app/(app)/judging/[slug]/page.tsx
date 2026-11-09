@@ -19,6 +19,7 @@ import {
   Lock,
   Search,
   ShieldCheck,
+  Users,
   Video,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -36,12 +37,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@juryza/ui/components/ui/empty";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-} from "@juryza/ui/components/ui/field";
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@juryza/ui/components/ui/field";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@juryza/ui/components/ui/input-group";
 import { Kbd } from "@juryza/ui/components/ui/kbd";
 import { Progress } from "@juryza/ui/components/ui/progress";
@@ -63,6 +59,7 @@ import { cn } from "@juryza/ui/lib/utils";
 import { RichContent } from "@/components/editor/rich-content";
 import { api } from "@/lib/api";
 import { formatDateTime, formatNumber, relativeTime } from "@/lib/format";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { rawScore } from "@/lib/scoring";
 import type { Json, RichDoc, RubricCriterion } from "@/lib/types";
 
@@ -91,12 +88,22 @@ interface QueueItem {
   criteria: Record<string, number> | null;
   favorite: boolean | null;
   comment: string | null;
+  revision: number | null;
   scoredAt: string | null;
   scored: boolean;
 }
 
 interface QueueDetail {
-  event: { id: string; slug: string; name: string; judgingClose: string | null; hue: number };
+  collective?: boolean;
+  event: {
+    id: string;
+    slug: string;
+    name: string;
+    judgingOpen: string;
+    judgingClose: string | null;
+    hue: number;
+  };
+  status: "upcoming" | "open" | "closed";
   locked: boolean;
   criteria: Json<RubricCriterion>[];
   total: number;
@@ -170,7 +177,7 @@ export default function ScoringConsolePage() {
       (filter === "all" || (filter === "done" ? i.scored : !i.scored)) &&
       (!needle ||
         i.title.toLowerCase().includes(needle) ||
-        (i.trackName ?? "").toLowerCase().includes(needle) ||
+        (EVENT_TRACKS_ENABLED && (i.trackName ?? "").toLowerCase().includes(needle)) ||
         i.techTags.some((t) => t.toLowerCase().includes(needle)))
   );
 
@@ -193,8 +200,9 @@ export default function ScoringConsolePage() {
       criteria: Record<string, number>;
       favorite: boolean;
       comment: string | null;
-    }) => api.post("/api/judge/scores", v),
-    onSuccess: (_res, v) => {
+      revision: number;
+    }) => api.post<{ revision?: number }>("/api/judge/scores", v),
+    onSuccess: (res, v) => {
       queryClient.setQueryData<QueueDetail>(key, (old) => {
         if (!old) return old;
         const nextItems = old.items.map((i) => {
@@ -204,6 +212,7 @@ export default function ScoringConsolePage() {
               criteria: v.criteria,
               favorite: v.favorite,
               comment: v.comment,
+              revision: res.revision ?? i.revision,
               scoredAt: new Date().toISOString(),
               scored: true,
             };
@@ -217,17 +226,18 @@ export default function ScoringConsolePage() {
         return rest;
       });
       void queryClient.invalidateQueries({ queryKey: ["judge", "queue"], exact: true });
+      void queryClient.invalidateQueries({ queryKey: key });
       void queryClient.invalidateQueries({ queryKey: ["me", "overview"] });
 
       const idx = items.findIndex((i) => i.projectId === v.projectId);
       const ordered = [...items.slice(idx + 1), ...items.slice(0, idx)];
       const next = ordered.find((i) => !i.scored && i.projectId !== v.projectId);
       if (next) {
-      toast.success("Évaluation enregistrée", { description: `Projet suivant : ${next.title}` });
+        toast.success("Évaluation enregistrée", { description: `Projet suivant : ${next.title}` });
         select(next.projectId);
       } else {
         setSelectedId(v.projectId);
-      toast.success("Évaluation enregistrée — tous les projets sont évalués");
+        toast.success("Évaluation enregistrée — tous les projets sont évalués");
       }
     },
     onError: (e) => toast.error(e.message),
@@ -240,6 +250,7 @@ export default function ScoringConsolePage() {
       criteria: draft.marks,
       favorite: draft.favorite,
       comment: draft.comment.trim() || null,
+      revision: current.revision ?? 0,
     });
   };
 
@@ -320,14 +331,21 @@ export default function ScoringConsolePage() {
             </Link>
             <h1 className="truncate text-2xl font-semibold tracking-tight">{data.event.name}</h1>
           </div>
+          <Button
+            variant="outline"
+            nativeButton={false}
+            render={<Link href={`/manage/${slug}/judges`} />}
+          >
+            <Users /> Gérer le jury
+          </Button>
         </div>
         <div className="flex items-center gap-3">
-              <Progress value={pct} className="flex-1" aria-label="Progression des évaluations" />
+          <Progress value={pct} className="flex-1" aria-label="Progression des évaluations" />
           <span className="shrink-0 text-sm font-medium tabular-nums">
-                {done} sur {items.length} évalués
+            {done} sur {items.length} évalués
           </span>
         </div>
-        {data.event.judgingClose && !locked && (
+        {data.status === "open" && data.event.judgingClose && (
           <p className="text-muted-foreground -mt-2 text-xs">
             Clôture des évaluations {relativeTime(data.event.judgingClose)} ·{" "}
             {formatDateTime(data.event.judgingClose)}
@@ -335,12 +353,34 @@ export default function ScoringConsolePage() {
         )}
       </div>
 
-      {locked && (
+      {data.status === "upcoming" && (
+        <Alert>
+          <Lock />
+          <AlertTitle>Les évaluations ne sont pas encore ouvertes</AlertTitle>
+          <AlertDescription>
+            Vous pourrez enregistrer vos notes au début des présentations, le{" "}
+            {formatDateTime(data.event.judgingOpen)}.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {data.status === "closed" && (
         <Alert>
           <Lock />
           <AlertTitle>Les évaluations sont closes</AlertTitle>
           <AlertDescription>
-                Les notes sont définitives : vous pouvez les consulter, mais plus les modifier.
+            Les notes sont définitives : vous pouvez les consulter, mais plus les modifier.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {data.collective && (
+        <Alert>
+          <Users />
+          <AlertTitle>Délibération collective</AlertTitle>
+          <AlertDescription>
+            Tous les coachs rattachés modifient la même note par critère. Une modification plus
+            récente ne peut pas être écrasée silencieusement.
           </AlertDescription>
         </Alert>
       )}
@@ -400,14 +440,16 @@ export default function ScoringConsolePage() {
               <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
                 <TabsList className="w-full">
                   <TabsTrigger value="all">All {items.length}</TabsTrigger>
-                <TabsTrigger value="todo">À faire {items.length - done}</TabsTrigger>
-                <TabsTrigger value="done">Terminés {done}</TabsTrigger>
+                  <TabsTrigger value="todo">À faire {items.length - done}</TabsTrigger>
+                  <TabsTrigger value="done">Terminés {done}</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
               {visible.length === 0 ? (
-                  <p className="text-muted-foreground p-6 text-center text-sm">Aucun projet ne correspond.</p>
+                <p className="text-muted-foreground p-6 text-center text-sm">
+                  Aucun projet ne correspond.
+                </p>
               ) : (
                 batches.map((b) => (
                   <div key={b} className="flex flex-col gap-0.5">
@@ -435,7 +477,7 @@ export default function ScoringConsolePage() {
                             {i.scored ? (
                               <CheckCircle2
                                 className="text-success size-4 shrink-0"
-                        aria-label="Évalué"
+                                aria-label="Évalué"
                               />
                             ) : inProgress ? (
                               <CircleDot
@@ -445,19 +487,26 @@ export default function ScoringConsolePage() {
                             ) : (
                               <Circle
                                 className="text-muted-foreground/60 size-4 shrink-0"
-                        aria-label="À faire"
+                                aria-label="À faire"
                               />
                             )}
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-sm font-medium">{i.title}</span>
-                              <span className="text-muted-foreground block truncate text-xs">
-                                {i.trackName ?? "No track"}
-                              </span>
+                              {EVENT_TRACKS_ENABLED && (
+                                <span className="text-muted-foreground block truncate text-xs">
+                                  {i.trackName ?? "No track"}
+                                </span>
+                              )}
                             </span>
                             {i.scored && i.criteria && (
                               <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                                {i.favorite && <Heart className="text-primary mr-1 inline size-3" />}
-                                {formatNumber(rawScore(i.criteria, criteria, Boolean(i.favorite)), 2)}
+                                {i.favorite && (
+                                  <Heart className="text-primary mr-1 inline size-3" />
+                                )}
+                                {formatNumber(
+                                  rawScore(i.criteria, criteria, Boolean(i.favorite)),
+                                  2
+                                )}
                               </span>
                             )}
                           </button>
@@ -476,10 +525,12 @@ export default function ScoringConsolePage() {
                 <CardContent className="flex flex-col gap-4">
                   <div className="flex flex-col gap-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      {current.trackName && <Badge variant="secondary">{current.trackName}</Badge>}
+                      {EVENT_TRACKS_ENABLED && current.trackName && (
+                        <Badge variant="secondary">{current.trackName}</Badge>
+                      )}
                       {current.scored && (
                         <Badge variant="outline">
-                      <CheckCircle2 /> Évalué {relativeTime(current.scoredAt)}
+                          <CheckCircle2 /> Évalué {relativeTime(current.scoredAt)}
                         </Badge>
                       )}
                       {current.favorite && (
@@ -534,21 +585,23 @@ export default function ScoringConsolePage() {
                 <CardContent className="flex flex-col gap-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h3 className="font-semibold">Rubric</h3>
+                      <h3 className="font-semibold">
+                        {data.collective ? "Grille de délibération" : "Rubric"}
+                      </h3>
                       <p className="text-muted-foreground flex flex-wrap items-center gap-1 text-xs">
                         <Kbd>1</Kbd>–<Kbd>5</Kbd> to mark · <Kbd>↑</Kbd>
                         <Kbd>↓</Kbd> to move · <Kbd>⌘</Kbd>
-                    <Kbd>↵</Kbd> enregistrer et continuer
+                        <Kbd>↵</Kbd> enregistrer et continuer
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-muted-foreground text-xs">
-                {draft.favorite ? "Note pondérée avec bonus +1" : "Note pondérée"}
+                        {draft.favorite ? "Note pondérée avec bonus +1" : "Note pondérée"}
                       </p>
                       <p className="text-2xl font-semibold tabular-nums">
                         {Object.keys(draft.marks).length ? formatNumber(preview, 2) : "—"}
                         <span className="text-muted-foreground text-sm font-normal">
-                  {draft.favorite ? " / 5 + bonus" : " / 5"}
+                          {draft.favorite ? " / 5 + bonus" : " / 5"}
                         </span>
                       </p>
                     </div>
@@ -558,7 +611,7 @@ export default function ScoringConsolePage() {
                     <Alert>
                       <AlertTitle>No rubric yet</AlertTitle>
                       <AlertDescription>
-                      Les administrateurs n’ont pas encore défini les critères de cet événement.
+                        Les administrateurs n’ont pas encore défini les critères de cet événement.
                       </AlertDescription>
                     </Alert>
                   ) : (
@@ -587,7 +640,7 @@ export default function ScoringConsolePage() {
                               )}
                             </div>
                             <ToggleGroup
-                          aria-label={`Note pour ${c.label}`}
+                              aria-label={`Note pour ${c.label}`}
                               value={value ? [String(value)] : []}
                               onValueChange={(v) => {
                                 setActive(idx);
@@ -647,7 +700,11 @@ export default function ScoringConsolePage() {
                       id="judge-comment"
                       value={draft.comment}
                       onChange={(e) => update({ comment: e.target.value })}
-                      placeholder="Points marquants ? Visible uniquement par vous et les administrateurs."
+                      placeholder={
+                        data.collective
+                          ? "Commentaire de consensus, visible par les membres du projet après publication."
+                          : "Points marquants ? Visible uniquement par vous et les administrateurs."
+                      }
                       maxLength={4000}
                       rows={3}
                       disabled={locked}
@@ -657,7 +714,9 @@ export default function ScoringConsolePage() {
                   <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
                       <ShieldCheck className="size-3.5 shrink-0" />
-                    Vos notes sont privées : les autres coachs ne peuvent pas les voir.
+                      {data.collective
+                        ? "Note et commentaire partagés entre les coachs rattachés."
+                        : "Vos notes sont privées : les autres coachs ne peuvent pas les voir."}
                     </p>
                     {!locked && (
                       <Button
@@ -666,7 +725,9 @@ export default function ScoringConsolePage() {
                         className="shrink-0"
                       >
                         {save.isPending ? <Spinner /> : null}
-                      {current.scored && !dirty ? "Mettre à jour et continuer" : "Enregistrer et continuer"}
+                        {current.scored && !dirty
+                          ? "Mettre à jour et continuer"
+                          : "Enregistrer et continuer"}
                         <ArrowRight />
                       </Button>
                     )}

@@ -11,8 +11,8 @@ import {
   ArrowUpDown,
   Award,
   CalendarDays,
+  Coins,
   Compass,
-  DollarSign,
   GitBranch,
   Medal,
   Search,
@@ -294,10 +294,10 @@ function LeaderboardContent() {
             <Card className="bg-background/80 gap-0 p-4 backdrop-blur">
               <div className="flex flex-col gap-1">
                 <span className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
-                  <DollarSign className="size-4 text-emerald-500" /> Total Prizes Won
+                  <Coins className="size-4 text-emerald-500" /> Total DZcoin
                 </span>
                 <span className="text-2xl font-bold tracking-tight text-emerald-600 tabular-nums dark:text-emerald-400 sm:text-3xl">
-                  ${(data?.totals.prize_usd_awarded ?? 51100).toLocaleString()}
+                  {(data?.totals.prize_usd_awarded ?? 51100).toLocaleString()} DZcoin
                 </span>
               </div>
             </Card>
@@ -417,10 +417,10 @@ function LeaderboardContent() {
                     </div>
                     <div className="px-2">
                       <span className="text-muted-foreground block text-[0.7rem] uppercase font-semibold">
-                        Prizes
+                        DZcoin
                       </span>
                       <span className="text-base sm:text-xl font-bold text-emerald-600 tabular-nums dark:text-emerald-400">
-                        ${viewerEntry.prizeUsd.toLocaleString()}
+                        {viewerEntry.prizeUsd.toLocaleString()} DZcoin
                       </span>
                     </div>
                     <div className="px-2">
@@ -540,7 +540,7 @@ function LeaderboardContent() {
                   >
                     <TabsList>
                       <TabsTrigger value="points">Points</TabsTrigger>
-                      <TabsTrigger value="prize">Prize ($)</TabsTrigger>
+                      <TabsTrigger value="prize">DZcoin</TabsTrigger>
                       <TabsTrigger value="awards">Awards</TabsTrigger>
                       <TabsTrigger value="events">Events</TabsTrigger>
                     </TabsList>
@@ -618,9 +618,9 @@ function LeaderboardContent() {
                                 type="button"
                                 onClick={() => handleHeaderSort("prize")}
                                 className="inline-flex items-center gap-1.5 hover:text-foreground font-semibold uppercase tracking-wider transition-colors cursor-pointer"
-                                title="Sort by Prizes Won"
+                                title="Sort by DZcoin"
                               >
-                                Prizes Won
+                                DZcoin
                                 <SortIndicator active={sortKey === "prize"} dir={sortDir} />
                               </button>
                             </div>
@@ -747,7 +747,7 @@ function LeaderboardContent() {
                                 </span>
                               </td>
                               <td className="px-4 py-4 text-right font-bold text-emerald-600 tabular-nums dark:text-emerald-400">
-                                {p.prizeUsd > 0 ? `$${p.prizeUsd.toLocaleString()}` : "—"}
+                                {p.prizeUsd > 0 ? `${p.prizeUsd.toLocaleString()} DZcoin` : "—"}
                               </td>
                               <td className="px-4 py-4 text-center tabular-nums">
                                 {p.eventsCount}
@@ -846,10 +846,10 @@ function PodiumCard({ person, place }: { person: LeaderboardEntry; place: 1 | 2 
           </div>
           <div>
             <span className="text-muted-foreground block text-[0.7rem] uppercase font-semibold">
-              Prizes Won
+              DZcoin
             </span>
             <span className="font-bold text-emerald-600 text-sm tabular-nums dark:text-emerald-400">
-              ${person.prizeUsd.toLocaleString()}
+              {person.prizeUsd.toLocaleString()} DZcoin
             </span>
           </div>
           <div>

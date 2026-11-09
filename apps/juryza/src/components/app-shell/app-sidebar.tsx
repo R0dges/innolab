@@ -24,8 +24,9 @@ import { useI18n } from "@/components/locale-provider";
 import { UserAvatar } from "@/components/user-avatar";
 import { UserMenu } from "@/components/user-menu";
 import type { Viewer } from "@/components/viewer";
+import { useEvent } from "@/lib/queries";
 
-import { mainNav, manageNav, type NavGroup } from "./nav";
+import { judgePanelNav, mainNav, manageNav, type NavGroup } from "./nav";
 
 /** `/manage/<slug>/…` → slug (but not `/manage/new`). */
 export function manageSlug(pathname: string): string | null {
@@ -59,6 +60,13 @@ function Groups({ groups, pathname }: { groups: NavGroup[]; pathname: string }) 
       </SidebarGroupContent>
     </SidebarGroup>
   ));
+}
+
+function EventGroups({ slug, pathname }: { slug: string; pathname: string }) {
+  const { data } = useEvent(slug);
+  const { t } = useI18n();
+  const groups = data?.viewer?.canManage ? manageNav(slug, t) : judgePanelNav(slug, t);
+  return <Groups groups={groups} pathname={pathname} />;
 }
 
 export function AppSidebar({ viewer }: { viewer: Viewer }) {
@@ -104,7 +112,7 @@ export function AppSidebar({ viewer }: { viewer: Viewer }) {
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroup>
-            <Groups groups={manageNav(slug, t)} pathname={pathname} />
+            <EventGroups slug={slug} pathname={pathname} />
           </>
         ) : (
           <Groups groups={mainNav(viewer, t)} pathname={pathname} />

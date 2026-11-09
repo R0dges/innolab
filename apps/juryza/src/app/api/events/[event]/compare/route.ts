@@ -1,9 +1,10 @@
 import { and, eq, inArray } from "drizzle-orm";
 
 import { db, pairwiseVote, project, team, track } from "@/lib/db";
-import { canManage, loadEvent } from "@/lib/server/events";
-import { badRequest, handle } from "@/lib/server/http";
-import { resolveIdentity } from "@/lib/server/identity";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
+import { canManage, isEventCoach, loadEvent, viewerForEvent } from "@/lib/server/events";
+import { badRequest, forbidden, handle } from "@/lib/server/http";
+import { requireUser } from "@/lib/server/identity";
 import { computeResults } from "@/lib/server/results";
 import { buildVectors, cosine, nearest } from "@/lib/similarity";
 
@@ -18,8 +19,12 @@ import { buildVectors, cosine, nearest } from "@/lib/similarity";
  * rank, normalized score, per-criterion means and community votes of each.
  */
 export const GET = handle<{ event: string }>(async (req, { event: ref }) => {
-  const me = await resolveIdentity(req);
+  const me = await requireUser(req);
   const e = await loadEvent(ref, me);
+  const viewer = await viewerForEvent(e, me);
+  if (!viewer?.registered && !viewer?.isJudge && !viewer?.canManage) {
+    throw forbidden("Les projets sont réservés aux participants et coachs de cet événement");
+  }
   const requested = (new URL(req.url).searchParams.get("ids") ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -45,7 +50,8 @@ export const GET = handle<{ event: string }>(async (req, { event: ref }) => {
     .leftJoin(team, eq(team.id, project.teamId))
     .where(and(eq(project.eventId, e.id), eq(project.status, "submitted")));
 
-  const showScores = e.resultsPublished || canManage(me, e);
+  const showScores =
+    e.resultsPublished || canManage(me, e) || (await isEventCoach(e.id, me.userId));
   const results = showScores ? await computeResults(e) : null;
   const resultById = new Map(results?.projects.map((r) => [r.id, r]));
 
@@ -99,6 +105,7 @@ export const GET = handle<{ event: string }>(async (req, { event: ref }) => {
       const r = resultById.get(p.id);
       return {
         ...p,
+        trackName: EVENT_TRACKS_ENABLED ? p.trackName : null,
         description: p.description?.slice(0, 600) ?? null,
         result: r
           ? {

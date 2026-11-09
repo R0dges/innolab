@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { bundleSchema } from "@/lib/server/bundle";
+import { eventAssistantInput } from "@/lib/server/event-workspace";
 import { DATASETS } from "@/lib/server/exports";
 import { eventInput, eventPatch, projectInput } from "@/lib/server/schemas";
 import { optionalUrl } from "@/lib/server/validation";
@@ -26,7 +27,7 @@ type ErrorCode = 400 | 401 | 403 | 404 | 409 | 429 | 503;
 const TAGS = {
   Auth: "Better Auth session endpoints (cookie sessions for browsers). API clients use a personal token instead.",
   Events: "Hackathons: details, lifecycle dates, configuration, registration and announcements.",
-  "Tracks & rubric": "Tracks (categories), weighted scoring criteria and the prize table.",
+  "Rubric & rewards": "Project scoring criteria. Material rewards are reserved for a later phase.",
   Teams: "Team formation: create, join by invite link, leave, disband.",
   Projects: "Submissions: the public gallery, drafts, editing and similarity.",
   Comments: "The public discussion thread on each submitted project.",
@@ -35,7 +36,7 @@ const TAGS = {
   Results: "The leaderboard (hidden until published) and side-by-side comparison.",
   "Organizer data":
     "Organizer console data: dashboard, audit trail, exports, bundles and duplicate detection.",
-  Certificates: "Signed participation and winner certificates, publicly verifiable.",
+  Certificates: "Signed coach-participation certificates, publicly verifiable.",
   Webhooks: "Signed HTTP callbacks for event activity.",
   Me: "The caller's own account, dashboard and personal API tokens.",
   Users: "Public profiles.",
@@ -215,25 +216,14 @@ const bodies = {
       .describe("Plan and report coverage without writing anything."),
   }),
   certificates: z.object({ kind: z.enum(["judges", "winners"]) }),
-  judgeTracks: z.object({
-    trackIds: z
-      .array(z.string())
-      .max(30)
-      .describe("Track ids this judge covers; empty = all tracks."),
-  }),
   judgeInvite: z.object({
     email,
-    trackIds: z.array(z.string()).max(30).default([]).describe("Empty = all tracks."),
   }),
   prizes: z.object({
     prizes: z
       .array(
         z.object({
-          kind: z.enum(["overall", "track", "community"]).default("overall"),
-          trackId: z
-            .string()
-            .nullish()
-            .describe('Required for `kind: "track"`, ignored otherwise.'),
+          kind: z.enum(["overall", "community"]).default("overall"),
           name: z.string().min(1).max(80),
           description: z.string().max(400).nullish(),
           amount: z.string().max(40).nullish().describe('Free text, e.g. "$1,000".'),
@@ -284,20 +274,6 @@ const bodies = {
     name: z.string().min(2).max(60).optional(),
     description: z.string().max(500).nullish(),
     lookingForMembers: z.boolean().optional(),
-  }),
-  tracks: z.object({
-    tracks: z
-      .array(
-        z.object({
-          id: z
-            .string()
-            .optional()
-            .describe("Existing track id to update in place; omit to create."),
-          name: z.string().min(1).max(60),
-          description: z.string().max(400).nullish(),
-        })
-      )
-      .max(30),
   }),
   voter: z.object({
     email,
@@ -424,8 +400,8 @@ op("post", "/api/events", {
   tag: "Events",
   summary: "Create an event",
   description:
-    'Requires the `judge` (coach) platform role or above (403 otherwise). Starts as a draft unless `visibility: "published"`, owned by the caller, with the default six-criterion Innovation Lab rubric and the given `tracks`. 409 if the slug is taken.',
-  body: eventInput,
+    'Requires the `judge` (coach) platform role or above (403 otherwise). Starts as a draft unless `visibility: "published"`, owned by the caller, with the default six-criterion Innovation Lab rubric. An initial audit document and organized resource links may be attached in the same request. 409 if the slug is taken.',
+  body: eventInput.omit({ tracks: true }),
   status: 201,
   returns: "`{ id, slug }`.",
   errors: [403, 409],
@@ -434,11 +410,11 @@ op("post", "/api/events/import", {
   tag: "Events",
   summary: "Import an event bundle",
   description:
-    "Requires the `organizer` role. Creates a NEW draft event owned by the caller from a Juryza bundle (`GET /api/events/{event}/bundle`) or any file in the DOGFOOD fixtures shape. Ids are kept when free and remapped when they collide; people are matched by email and unknown emails get a fresh account.",
+    "Requires the `organizer` role. Creates a NEW draft event owned by the caller from a Juryza bundle (`GET /api/events/{event}/bundle`) or any file in the DOGFOOD fixtures shape. Track data is rejected while tracks are disabled. Ids are kept when free and remapped when they collide; people are matched by email and unknown emails get a fresh account.",
   body: bundleSchema,
   status: 201,
   returns:
-    "`{ eventId, slug, created: { users, tracks, teams, projects, judges, scores, comparisons }, skipped: string[] }`.",
+    "`{ eventId, slug, created: { users, teams, projects, judges, scores, comparisons }, skipped: string[] }`.",
   errors: [403],
 });
 op("get", "/api/events/{event}", {
@@ -446,9 +422,9 @@ op("get", "/api/events/{event}", {
   access: "optional",
   summary: "Get an event",
   description:
-    "The event with tracks, prizes, rubric, judging panel, the latest five announcements (pinned first) and counts. Draft events 404 for anyone but their organizers. Signed-in callers also get `viewer`.",
+    "The event with its rubric, judging panel, the latest five announcements (pinned first) and counts. Draft events are visible only to event managers and appointed judges. Signed-in callers also get `viewer`.",
   returns:
-    "`{ event, tracks, prizes, criteria, judges, announcements, counts: { projects, participants, teams }, viewer: { registered, team, isJudge, canManage } | null }`.",
+    "`{ event, prizes, criteria, judges, announcements, counts: { projects, participants, teams }, viewer: { registered, team, isJudge, canManage } | null }`.",
 });
 op("patch", "/api/events/{event}", {
   tag: "Events",
@@ -463,6 +439,15 @@ op("delete", "/api/events/{event}", {
   summary: "Delete an event",
   description: `${ORGANIZERS} Deletes the event and everything in it (teams, projects, scores, votes). Irreversible.`,
   returns: "`{ ok: true }`.",
+  errors: [403],
+});
+op("patch", "/api/events/{event}/assistant", {
+  tag: "Events",
+  summary: "Configure the event assistant",
+  description:
+    "Event managers and appointed coaches can set or remove the private Copilot assistant link for one event edition. The URL is only exposed to registered participants, coaches and managers, and every change is audited.",
+  body: eventAssistantInput,
+  returns: "The configured assistant link, or `null` after removal.",
   errors: [403],
 });
 op("post", "/api/events/{event}/registration", {
@@ -504,32 +489,17 @@ op("delete", "/api/announcements/{id}", {
   errors: [403],
 });
 
-/* ───────────────────────────── Tracks & rubric ───────────────────────────── */
+/* ─────────────────────────── Rubric & rewards ─────────────────────────── */
 
-op("get", "/api/events/{event}/tracks", {
-  tag: "Tracks & rubric",
-  access: "optional",
-  summary: "List tracks",
-  description: "The event's tracks in display order.",
-  returns: "`{ tracks: Track[] }`.",
-});
-op("put", "/api/events/{event}/tracks", {
-  tag: "Tracks & rubric",
-  summary: "Replace tracks",
-  description: `${ORGANIZERS} Rows with an existing \`id\` are updated in place (projects keep their track), rows without one are created, and tracks left out are deleted (their projects become untracked).`,
-  body: bodies.tracks,
-  returns: "`{ tracks: Track[] }`.",
-  errors: [403],
-});
 op("get", "/api/events/{event}/rubric", {
-  tag: "Tracks & rubric",
+  tag: "Rubric & rewards",
   access: "optional",
   summary: "Get the rubric",
   description: "The weighted scoring criteria in display order.",
   returns: "`{ criteria: RubricCriterion[] }`.",
 });
 op("put", "/api/events/{event}/rubric", {
-  tag: "Tracks & rubric",
+  tag: "Rubric & rewards",
   summary: "Replace the rubric",
   description: `${ADMINS} Rows are matched by \`key\` (what judges' marks are stored against). Weights are relative and results recompute on read, so re-weighting never invalidates marks. 400 on duplicate keys.`,
   body: bodies.rubric,
@@ -537,16 +507,17 @@ op("put", "/api/events/{event}/rubric", {
   errors: [403],
 });
 op("get", "/api/events/{event}/prizes", {
-  tag: "Tracks & rubric",
+  tag: "Rubric & rewards",
   access: "optional",
   summary: "List prizes",
-  description: "The prize table. Winners are derived from results, never stored.",
+  description:
+    "Reserved for a later phase. Returns an empty prize table while rewards are disabled.",
   returns: "`{ prizes: Prize[] }`.",
 });
 op("put", "/api/events/{event}/prizes", {
-  tag: "Tracks & rubric",
+  tag: "Rubric & rewards",
   summary: "Replace prizes",
-  description: `${ORGANIZERS} A prize is awarded by overall judged \`rank\`, by \`rank\` within one track (\`kind: "track"\`), or by community vote (\`kind: "community"\`).`,
+  description: `${ORGANIZERS} Reserved for a later phase; currently returns 403. The published first-place project is recognized through the Wall of Fame.`,
   body: bodies.prizes,
   returns: "`{ prizes: Prize[] }`.",
   errors: [403],
@@ -682,7 +653,6 @@ op("get", "/api/events/{event}/projects", {
   description: "Submitted projects only — public, no auth needed. At most 500.",
   query: {
     q: { description: "Search title, tagline and write-up." },
-    track: { description: "Filter by track id." },
     tag: { description: "Filter by tech tag." },
     sort: {
       description: "`newest` (default) or `title`.",
@@ -696,7 +666,7 @@ op("post", "/api/events/{event}/projects", {
   summary: "Start or submit a project",
   description:
     "Creates the caller's team project (draft, or submitted with `submit: true`). **403 once the submission deadline has passed** — enforced by the server whatever the UI shows. 403 if the caller has no team; 409 if the team already has a project.",
-  body: projectInput,
+  body: projectInput.omit({ trackId: true }),
   status: 201,
   returns: '`{ id, status: "draft" | "submitted" }`.',
   errors: [403, 409],
@@ -709,7 +679,7 @@ op("get", "/api/projects/{id}", {
   description:
     "Submitted projects of published events are public. Drafts are visible only to the team and the event's organizers — anyone else gets 404 (no existence leak).",
   returns:
-    "`{ project, event, track, team: { id, name, members } | null, viewer: { manager, member, owner, canEdit, submissionsOpen } }`.",
+    "`{ project, event, team: { id, name, members } | null, viewer: { manager, member, owner, canEdit, submissionsOpen } }`.",
 });
 op("patch", "/api/projects/{id}", {
   tag: "Projects",
@@ -717,7 +687,7 @@ op("patch", "/api/projects/{id}", {
   summary: "Edit a project",
   description:
     "Team members until the submission deadline; the event's organizers at any time. 403 for anyone else, and 403 for members after the deadline. Only the fields sent change. `submit: true` submits, `submit: false` withdraws back to draft.",
-  body: projectInput.partial(),
+  body: projectInput.omit({ trackId: true }).partial(),
   returns: "`{ project }`.",
   errors: [403],
 });
@@ -735,7 +705,7 @@ op("get", "/api/projects/{id}/similar", {
   params: { id: "A submitted project's id." },
   summary: "Similar projects",
   description: "The four submissions in the same event most similar by content (TF-IDF cosine).",
-  returns: "`{ similar: { id, title, tagline, techTags, thumbnailUrl, trackName, score }[] }`.",
+  returns: "`{ similar: { id, title, tagline, techTags, thumbnailUrl, score }[] }`.",
 });
 
 /* ───────────────────────────────── Comments ───────────────────────────────── */
@@ -774,34 +744,27 @@ op("delete", "/api/comments/{id}", {
 op("get", "/api/events/{event}/judges", {
   tag: "Judging",
   summary: "The judging panel",
-  description: `${ORGANIZERS} Each judge's tracks and progress (assigned vs scored). For Innolab, only platform admins receive and manage pending invitations.`,
+  description:
+    "Event managers and appointed judges can view the panel, its progress, and pending invitations. Appointed judges may invite additional judges.",
   returns:
-    "`{ canManage, judges: { id, name, email, username, image, trackIds, joinedAt, assigned, scored, lastScoredAt }[], invites: { id, email, trackIds, createdAt, inviteUrl }[] }`.",
+    "`{ canInvite, canRemove, judges: { id, name, email, username, image, joinedAt, assigned, scored, lastScoredAt }[], invites: { id, email, createdAt, inviteUrl }[] }`.",
   errors: [403],
 });
 op("post", "/api/events/{event}/judges", {
   tag: "Judging",
   summary: "Invite a judge",
-  description: `${ORGANIZERS} For Innolab this action is restricted to platform admins. An existing account joins the panel immediately; otherwise an invitation link is created.`,
+  description:
+    "Event managers and appointed judges may add another judge. An existing account joins the panel immediately; otherwise an invitation link bound to the email address is created.",
   body: bodies.judgeInvite,
   status: 201,
   returns: '`{ status: "added", userId, name }` or `{ status: "invited", inviteUrl }`.',
-  errors: [403],
-});
-op("patch", "/api/events/{event}/judges/{userId}", {
-  tag: "Judging",
-  params: { userId: "The judge's user id." },
-  summary: "Change a judge's tracks",
-  description: `${ORGANIZERS} For Innolab this action is restricted to platform admins. 404 if the user is not on the panel.`,
-  body: bodies.judgeTracks,
-  returns: "`{ ok: true }`.",
   errors: [403],
 });
 op("delete", "/api/events/{event}/judges/{userId}", {
   tag: "Judging",
   params: { userId: "The judge's user id, or a pending invitation id (`inv_…`) to revoke it." },
   summary: "Remove a judge",
-  description: `${ORGANIZERS} For Innolab this action is restricted to platform admins. Unscored assignments are released; scores already given are kept as part of the record.`,
+  description: `${ORGANIZERS} For Innolab, removal and invitation revocation remain restricted to platform admins. Unscored assignments are released; scores already given are kept as part of the record.`,
   returns: "`{ ok: true }`.",
   errors: [403],
 });
@@ -825,13 +788,13 @@ op("get", "/api/events/{event}/assignments", {
   summary: "List assignments",
   description: `${ORGANIZERS} Every assignment with judge, project and whether it has been scored, plus coverage.`,
   returns:
-    "`{ reviewsPerProject, coverage: { projects, fullyCovered, underCovered }, assignments: { id, batch, judgeId, judgeName, projectId, projectTitle, trackId, scoredAt, scored }[] }`.",
+    "`{ reviewsPerProject, coverage: { projects, fullyCovered, underCovered }, assignments: { id, batch, judgeId, judgeName, projectId, projectTitle, scoredAt, scored }[] }`.",
   errors: [403],
 });
 op("post", "/api/events/{event}/assignments", {
   tag: "Judging",
   summary: "Generate assignments",
-  description: `${ORGANIZERS} Plans judge→project pairs honouring track eligibility and conflicts of interest (a judge never reviews their own team). Re-running tops up coverage and never duplicates. \`dryRun\` previews without writing.`,
+  description: `${ORGANIZERS} Plans judge→project pairs while enforcing conflicts of interest (a judge never reviews their own team). Re-running tops up coverage and never duplicates. \`dryRun\` previews without writing.`,
   body: bodies.assignments,
   returns: "`{ strategy, reviewsPerProject, judges, pairs, inserted?, dryRun?, coverage }`.",
   errors: [403],
@@ -869,7 +832,7 @@ op("post", "/api/judge/scores", {
   tag: "Judging",
   summary: "Save a score",
   description:
-    "Creates or updates the caller's score. 403 unless the project is assigned to the caller, and 403 after `judgingClose` or once results are published. 400 unless there is a mark for every rubric key and no unknown keys. Setting `favorite: true` moves the caller's single event-level +1 bonus to this project.",
+    "Creates or updates the caller's score. 403 unless the project is assigned to the caller, before `judgingOpen`, after `judgingClose`, or once results are published. 400 unless there is a mark for every rubric key and no unknown keys. Setting `favorite: true` moves the caller's single event-level +1 bonus to this project.",
   body: bodies.score,
   returns: "`{ ok: true }`.",
   errors: [403],
@@ -884,7 +847,7 @@ op("get", "/api/events/{event}/ballot", {
   description:
     "Submitted projects in an order shuffled per voter (stable for one voter, different between voters). Carries only the caller's own allocations and remaining credits — never anyone's totals. The caller's own team's projects are flagged `ownTeam`. In `open` access mode an anonymous voter cookie is issued.",
   returns:
-    "`{ event, enabled, open, access, allowedDomains, voter, budget, spent, maxVotesPerProject, projects: { id, title, tagline, thumbnailUrl, trackName, techTags, ownTeam, myVotes }[] }`.",
+    "`{ event, enabled, open, access, allowedDomains, voter, budget, spent, maxVotesPerProject, projects: { id, title, tagline, thumbnailUrl, techTags, ownTeam, myVotes }[] }`.",
 });
 op("post", "/api/events/{event}/votes", {
   tag: "Voting",
@@ -922,14 +885,14 @@ op("get", "/api/events/{event}/results", {
   access: "optional",
   summary: "Leaderboard",
   description:
-    "Normalized judged ranking, per-criterion means, track ranks, community votes, pairwise strength and prize winners. **Hidden until published:** everyone but the event's organizers gets `{ published: false, event }` with no numbers at all. Organizers see a `preview` before publishing, and are the only ones who get per-judge calibration (`judges`).",
+    "Normalized judged ranking, per-criterion means, community votes and pairwise strength. **Hidden until published:** everyone but the event's organizers gets `{ published: false, event }` with no numbers at all. Organizers see a `preview` before publishing, and are the only ones who get per-judge calibration (`judges`). The first-place project feeds the event Wall of Fame.",
   returns:
     "`{ published: false, event }` or `{ published, preview, event, criteria, projects, judges?, … }`.",
 });
 op("post", "/api/events/{event}/results", {
   tag: "Results",
   summary: "Publish or unpublish results",
-  description: `${ORGANIZERS} Publishing is refused (403) while community voting is still open, unless \`closeVoting: true\` ends the window now. Publishing locks scores and pairwise verdicts.`,
+  description: `${ORGANIZERS} Publishing is refused (403) until \`judgingClose\`. It is also refused while community voting is still open, unless \`closeVoting: true\` ends the voting window now. Publishing locks scores and pairwise verdicts.`,
   body: bodies.results,
   returns: "`{ published }`.",
   errors: [403],
@@ -951,9 +914,8 @@ op("get", "/api/events/{event}/compare", {
 op("get", "/api/events/{event}/overview", {
   tag: "Organizer data",
   summary: "Organizer dashboard",
-  description: `${ORGANIZERS} Headline counts, submissions per day, projects per track, per-judge progress (least progress first) and the latest audit entries.`,
-  returns:
-    "`{ event, phase, totals, submissionsPerDay, projectsPerTrack, judgeProgress, activity }`.",
+  description: `${ORGANIZERS} Headline counts, submissions per day, per-judge progress (least progress first) and the latest audit entries.`,
+  returns: "`{ event, phase, totals, submissionsPerDay, judgeProgress, activity }`.",
   errors: [403],
 });
 op("get", "/api/events/{event}/audit", {
@@ -1025,7 +987,7 @@ op("get", "/api/events/{event}/certificates", {
 op("post", "/api/events/{event}/certificates", {
   tag: "Certificates",
   summary: "Issue certificates",
-  description: `${ORGANIZERS} \`judges\`: one per judge with at least one review, stating how many they completed. \`winners\`: one per team member per prize — 403 until results are published. Re-issuing skips people who already hold the same certificate.`,
+  description: `${ORGANIZERS} \`judges\`: one per judge with at least one review, stating how many they completed. Winner certificates are reserved for a later phase and currently return 403. Re-issuing skips people who already hold the same certificate.`,
   body: bodies.certificates,
   status: 201,
   returns: "`{ issued, serials }`.",

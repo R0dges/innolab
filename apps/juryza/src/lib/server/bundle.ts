@@ -19,6 +19,7 @@ import {
   user as userTable,
 } from "@/lib/db";
 import { id, secretToken } from "@/lib/ids";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { docToText, textToDoc } from "@/lib/rich-text";
 import { auth } from "@/lib/server/auth";
 
@@ -51,6 +52,7 @@ export const bundleSchema = z.object({
     description: z.string().nullish(),
     submissions_open: iso.nullish(),
     submissions_close: iso,
+    judging_open: iso.nullish(),
     judging_close: iso.nullish(),
     voting_open: iso.nullish(),
     voting_close: iso.nullish(),
@@ -250,6 +252,7 @@ export async function importBundle(input: Bundle, opts: ImportOptions): Promise<
     workflow: "standard",
     submissionsOpen: d(b.event.submissions_open),
     submissionsClose: new Date(b.event.submissions_close),
+    judgingOpen: d(b.event.judging_open),
     judgingClose: d(b.event.judging_close),
     votingOpen: d(b.event.voting_open),
     votingClose: d(b.event.voting_close),
@@ -417,7 +420,9 @@ export async function importBundle(input: Bundle, opts: ImportOptions): Promise<
 export async function exportBundle(e: Event): Promise<Bundle> {
   const [tracks, criteria, prizes, panel, teams, members, projects, scores, comparisons] =
     await Promise.all([
-      db.select().from(track).where(eq(track.eventId, e.id)).orderBy(asc(track.position)),
+      EVENT_TRACKS_ENABLED
+        ? db.select().from(track).where(eq(track.eventId, e.id)).orderBy(asc(track.position))
+        : Promise.resolve([]),
       db
         .select()
         .from(rubricCriterion)
@@ -471,6 +476,7 @@ export async function exportBundle(e: Event): Promise<Bundle> {
       description: e.description,
       submissions_open: iso(e.submissionsOpen),
       submissions_close: e.submissionsClose.toISOString(),
+      judging_open: iso(e.judgingOpen),
       judging_close: iso(e.judgingClose),
       voting_open: iso(e.votingOpen),
       voting_close: iso(e.votingClose),
@@ -480,23 +486,32 @@ export async function exportBundle(e: Event): Promise<Bundle> {
       vote_budget: e.voteBudget,
       hue: e.hue,
     },
-    tracks: tracks.map((t) => ({ id: t.id, name: t.name, description: t.description })),
+    tracks: EVENT_TRACKS_ENABLED
+      ? tracks.map((t) => ({ id: t.id, name: t.name, description: t.description }))
+      : [],
     rubric: criteria.map((c) => ({
       key: c.key,
       label: c.label,
       weight: c.weight,
       description: c.description,
     })),
-    prizes: prizes.map((p) => ({
-      name: p.name,
-      kind: p.kind as "overall" | "track" | "community",
-      track: p.trackId,
-      amount: p.amount,
-      rank: p.rank,
-      description: p.description,
-    })),
+    prizes: prizes
+      .filter((p) => EVENT_TRACKS_ENABLED || p.kind !== "track")
+      .map((p) => ({
+        name: p.name,
+        kind: p.kind as "overall" | "track" | "community",
+        track: EVENT_TRACKS_ENABLED ? p.trackId : null,
+        amount: p.amount,
+        rank: p.rank,
+        description: p.description,
+      })),
     judges: [
-      ...panel.map((j) => ({ id: j.userId, name: j.name, email: j.email, tracks: j.trackIds })),
+      ...panel.map((j) => ({
+        id: j.userId,
+        name: j.name,
+        email: j.email,
+        tracks: EVENT_TRACKS_ENABLED ? j.trackIds : [],
+      })),
       ...extra.map((j) => ({ id: j.id, name: j.name, email: j.email, tracks: [] })),
     ],
     teams: teams.map((t) => ({
@@ -516,7 +531,7 @@ export async function exportBundle(e: Event): Promise<Bundle> {
     projects: projects.map((p) => ({
       id: p.id,
       team: p.teamId,
-      track: p.trackId,
+      track: EVENT_TRACKS_ENABLED ? p.trackId : null,
       title: p.title,
       tagline: p.tagline,
       summary: p.tagline,

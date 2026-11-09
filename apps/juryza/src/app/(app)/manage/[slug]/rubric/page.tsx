@@ -34,7 +34,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@juryza/ui/components/u
 import { cn } from "@juryza/ui/lib/utils";
 
 import { PageHeader } from "@/components/page";
-import { useViewer } from "@/components/viewer";
 import { api } from "@/lib/api";
 import { eventKey } from "@/lib/queries";
 import type { Json, RubricCriterion } from "@/lib/types";
@@ -93,13 +92,18 @@ const same = (a: Row[], b: Row[]) =>
 
 export default function RubricPage() {
   const { slug } = useParams<{ slug: string }>();
-  const viewer = useViewer();
-  const canEdit = viewer?.role === "admin";
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["rubric", slug],
-    queryFn: () => api.get<{ criteria: Json<RubricCriterion>[] }>(`/api/events/${slug}/rubric`),
+    queryFn: () =>
+      api.get<{
+        criteria: Json<RubricCriterion>[];
+        revision: number;
+        locked: boolean;
+        editable: boolean;
+      }>(`/api/events/${slug}/rubric`),
   });
+  const canEdit = data?.editable ?? false;
 
   const [draft, setDraft] = useState<Row[] | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
@@ -149,7 +153,13 @@ export default function RubricPage() {
 
   const save = useMutation({
     mutationFn: () =>
-      api.put<{ criteria: Json<RubricCriterion>[] }>(`/api/events/${slug}/rubric`, {
+      api.put<{
+        criteria: Json<RubricCriterion>[];
+        revision: number;
+        locked: boolean;
+        editable: boolean;
+      }>(`/api/events/${slug}/rubric`, {
+        revision: data?.revision ?? 0,
         criteria: rows.map((r) => ({
           key: r.key,
           label: r.label.trim(),
@@ -162,7 +172,7 @@ export default function RubricPage() {
       qc.invalidateQueries({ queryKey: eventKey(slug) });
       qc.invalidateQueries({ queryKey: ["results", slug] });
       setDraft(null);
-      toast.success("Rubric saved — results recomputed with the new weights");
+      toast.success("Grille enregistrée");
     },
     onError: (e) => toast.error(e.message),
   });
@@ -197,16 +207,24 @@ export default function RubricPage() {
         }
       />
 
-      {!canEdit && (
+      {data?.locked ? (
         <Alert>
           <Lock />
-          <AlertTitle>Criteria managed by admins</AlertTitle>
+          <AlertTitle>Grille verrouillée lors de la Promotion</AlertTitle>
           <AlertDescription>
-            Coaches can consult the evaluation grid. Only a platform admin can modify its
-            criteria or weights.
+            Les critères restent consultables, mais ne peuvent plus être modifiés après le passage
+            des pitchs aux projets.
           </AlertDescription>
         </Alert>
-      )}
+      ) : !canEdit && data ? (
+        <Alert>
+          <Lock />
+          <AlertTitle>Lecture seule</AlertTitle>
+          <AlertDescription>
+            Seuls les coachs rattachés à cet événement peuvent modifier la grille.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {error ? (
         <Alert variant="destructive">

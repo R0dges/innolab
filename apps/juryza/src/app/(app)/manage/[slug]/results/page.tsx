@@ -81,8 +81,9 @@ import { cn } from "@juryza/ui/lib/utils";
 
 import { PageHeader, StatCard } from "@/components/page";
 import { ApiError, api } from "@/lib/api";
-import { formatNumber } from "@/lib/format";
+import { formatDateTime, formatNumber } from "@/lib/format";
 import { votingIsOpen } from "@/lib/phase";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { eventKey, useEvent } from "@/lib/queries";
 import type { EventResults } from "@/lib/server/results";
 import type { Json } from "@/lib/types";
@@ -134,12 +135,16 @@ export default function ResultsPage() {
       qc.invalidateQueries({ queryKey: eventKey(slug) });
     },
     onError: (e) => {
-      if (e instanceof ApiError && e.status === 403) setConfirmClose(true);
+      if (e instanceof ApiError && e.status === 403 && voteOpen) setConfirmClose(true);
       else toast.error(e.message);
     },
   });
 
   const voteOpen = detail ? votingIsOpen(detail.event) : false;
+  const judgingClose = detail?.event.judgingClose
+    ? new Date(detail.event.judgingClose).getTime()
+    : null;
+  const deliberationsClosed = judgingClose !== null && Date.now() >= judgingClose;
   const onPublish = () => (voteOpen ? setConfirmClose(true) : publish.mutate({ published: true }));
   const exportUrl = (dataset: string, format: "csv" | "json") =>
     `/api/events/${slug}/export?dataset=${dataset}&format=${format}`;
@@ -212,14 +217,22 @@ export default function ResultsPage() {
                     {data.published ? "Published" : "Hidden"}
                   </Badge>
                   {voteOpen && <Badge variant="outline">Community voting open</Badge>}
+                  {!data.published && !deliberationsClosed && (
+                    <Badge variant="outline">Délibérations en cours</Badge>
+                  )}
                 </div>
                 <p className="text-muted-foreground text-sm">
                   {data.published
-                    ? "Everyone can see the leaderboard and prize winners. Unpublishing hides the numbers again."
+                    ? "Everyone can see the leaderboard and the first-place team appears in the Wall of Fame. Unpublishing hides the numbers again."
                     : "Only organizers can see these numbers. The public leaderboard returns no scores until you publish."}
                   {!data.published &&
                     voteOpen &&
                     " Results can't go public while voting runs — they would sway the vote."}
+                  {!data.published &&
+                    !deliberationsClosed &&
+                    (judgingClose === null
+                      ? " Configurez la clôture des délibérations avant de publier."
+                      : ` Publication disponible après le ${formatDateTime(judgingClose)}.`)}
                 </p>
               </div>
               <div className="flex shrink-0 gap-2">
@@ -233,7 +246,9 @@ export default function ResultsPage() {
                   </Button>
                 ) : (
                   <Button
-                    disabled={publish.isPending || data.projects.length === 0}
+                    disabled={
+                      publish.isPending || data.projects.length === 0 || !deliberationsClosed
+                    }
                     onClick={onPublish}
                   >
                     {publish.isPending ? <Spinner /> : <Trophy />} Publish results
@@ -375,11 +390,15 @@ function RankShift({ p }: { p: ProjectRow }) {
 
 function Ranking({ data }: { data: Results }) {
   const [track, setTrack] = useState<string>("all");
-  const tracks = [
-    ...new Map(
-      data.projects.filter((p) => p.trackId).map((p) => [p.trackId as string, p.trackName ?? ""])
-    ).entries(),
-  ];
+  const tracks = EVENT_TRACKS_ENABLED
+    ? [
+        ...new Map(
+          data.projects
+            .filter((p) => p.trackId)
+            .map((p) => [p.trackId as string, p.trackName ?? ""])
+        ).entries(),
+      ]
+    : [];
   const rows = data.projects.filter((p) => track === "all" || p.trackId === track);
   const moved = data.projects.filter(
     (p) => p.rank !== null && p.rawRank !== null && p.rank !== p.rawRank
@@ -424,7 +443,7 @@ function Ranking({ data }: { data: Results }) {
               <TableRow>
                 <TableHead className="w-14 pl-4 text-right">Rank</TableHead>
                 <TableHead>Project</TableHead>
-                <TableHead>Track</TableHead>
+                {EVENT_TRACKS_ENABLED && <TableHead>Track</TableHead>}
                 <TableHead className="text-right">Reviews</TableHead>
                 <TableHead className="text-right">Coup de cœur</TableHead>
                 <TableHead className="text-right">Raw + bonus</TableHead>
@@ -446,12 +465,14 @@ function Ranking({ data }: { data: Results }) {
                       <p className="text-muted-foreground truncate text-xs">{p.teamName}</p>
                     )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {p.trackName ?? "—"}
-                    {track !== "all" && p.trackRank !== null && (
-                      <span className="text-xs tabular-nums"> · #{p.trackRank} in track</span>
-                    )}
-                  </TableCell>
+                  {EVENT_TRACKS_ENABLED && (
+                    <TableCell className="text-muted-foreground">
+                      {p.trackName ?? "—"}
+                      {track !== "all" && p.trackRank !== null && (
+                        <span className="text-xs tabular-nums"> · #{p.trackRank} in track</span>
+                      )}
+                    </TableCell>
+                  )}
                   <TableCell
                     className={cn(
                       "text-right tabular-nums",

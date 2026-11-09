@@ -55,6 +55,7 @@ import { useViewer } from "@/components/viewer";
 import { api } from "@/lib/api";
 import { formatDate, formatNumber, relativeTime } from "@/lib/format";
 import { votingIsOpen } from "@/lib/phase";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { useEvent } from "@/lib/queries";
 import type { EventResults } from "@/lib/server/results";
 import type { Json, Project, Track } from "@/lib/types";
@@ -222,7 +223,9 @@ export default function ProjectPage() {
           <ProjectCover project={p} size="lg" className="aspect-[3/1] w-full rounded-2xl" />
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              {data.track && <Badge variant="secondary">{data.track.name}</Badge>}
+              {EVENT_TRACKS_ENABLED && data.track && (
+                <Badge variant="secondary">{data.track.name}</Badge>
+              )}
               {!submitted && <Badge variant="outline">Draft</Badge>}
               {p.submittedAt && (
                 <span className="text-muted-foreground flex items-center gap-1.5 text-sm">
@@ -324,10 +327,14 @@ function ResultsCard({ slug, projectId }: { slug: string; projectId: string }) {
             <dt className="text-muted-foreground text-xs">Normalized score</dt>
             <dd className="font-semibold tabular-nums">{formatNumber(r.normalized, 2)} / 5</dd>
           </div>
-          <div>
-            <dt className="text-muted-foreground text-xs">Track rank</dt>
-            <dd className="font-semibold tabular-nums">{r.trackRank ? `#${r.trackRank}` : "—"}</dd>
-          </div>
+          {EVENT_TRACKS_ENABLED && (
+            <div>
+              <dt className="text-muted-foreground text-xs">Track rank</dt>
+              <dd className="font-semibold tabular-nums">
+                {r.trackRank ? `#${r.trackRank}` : "—"}
+              </dd>
+            </div>
+          )}
           <div>
             <dt className="text-muted-foreground text-xs">Reviews</dt>
             <dd className="font-semibold tabular-nums">{r.reviews}</dd>
@@ -477,7 +484,7 @@ function SimilarList({ slug, projectId }: { slug: string; projectId: string }) {
     <Card className="gap-3">
       <CardHeader>
         <CardTitle className="text-base">Similar projects</CardTitle>
-        <CardDescription>By content, tags and track.</CardDescription>
+        <CardDescription>By content and tags.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-1">
         {isLoading ? (

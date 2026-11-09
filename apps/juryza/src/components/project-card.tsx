@@ -15,6 +15,7 @@ import { cn } from "@juryza/ui/lib/utils";
 import { coverStyle } from "@/components/event-bits";
 import { api } from "@/lib/api";
 import { hueOf, initials } from "@/lib/format";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { voteCost } from "@/lib/voting";
 
 /**
@@ -162,7 +163,7 @@ export function ProjectCard({
     >
       <div className="relative">
         <ProjectCover project={project} className="aspect-[16/9] w-full" />
-        {project.trackName && (
+        {EVENT_TRACKS_ENABLED && project.trackName && (
           <Badge
             variant="secondary"
             className="bg-background/85 absolute top-2.5 left-2.5 backdrop-blur"

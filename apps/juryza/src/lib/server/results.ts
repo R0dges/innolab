@@ -3,7 +3,10 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { bradleyTerry } from "@/lib/bradley-terry";
 import type { Event } from "@/lib/db";
 import {
+  coachFavorite,
+  collectiveScore,
   db,
+  eventJudge,
   pairwiseVote,
   prize,
   project,
@@ -14,7 +17,8 @@ import {
   user as userTable,
   vote,
 } from "@/lib/db";
-import { judgeStats, normalizeScores, rawScore } from "@/lib/scoring";
+import { EVENT_REWARDS_ENABLED, EVENT_TRACKS_ENABLED } from "@/lib/platform";
+import { collectiveRawScore, judgeStats, normalizeScores, rawScore } from "@/lib/scoring";
 import { tally } from "@/lib/voting";
 
 /**
@@ -35,8 +39,18 @@ import { tally } from "@/lib/voting";
 export type EventResults = Awaited<ReturnType<typeof computeResults>>;
 export type ProjectResult = EventResults["projects"][number];
 
-export async function computeResults(e: Pick<Event, "id">) {
-  const [criteria, projects, scores, votes, comparisons, prizes] = await Promise.all([
+export async function computeResults(e: Pick<Event, "id" | "workflow">) {
+  const [
+    criteria,
+    projects,
+    individualScores,
+    collectiveScores,
+    favorites,
+    votes,
+    comparisons,
+    prizes,
+    coaches,
+  ] = await Promise.all([
     db
       .select()
       .from(rubricCriterion)
@@ -68,6 +82,20 @@ export async function computeResults(e: Pick<Event, "id">) {
       .from(score)
       .where(eq(score.eventId, e.id)),
     db
+      .select({
+        projectId: collectiveScore.projectId,
+        criteria: collectiveScore.criteria,
+        comment: collectiveScore.comment,
+        revision: collectiveScore.revision,
+        updatedAt: collectiveScore.updatedAt,
+      })
+      .from(collectiveScore)
+      .where(eq(collectiveScore.eventId, e.id)),
+    db
+      .select({ projectId: coachFavorite.projectId, coachId: coachFavorite.coachId })
+      .from(coachFavorite)
+      .where(eq(coachFavorite.eventId, e.id)),
+    db
       .select({ projectId: vote.projectId, voterKey: vote.voterKey, votes: vote.votes })
       .from(vote)
       .where(eq(vote.eventId, e.id)),
@@ -76,18 +104,47 @@ export async function computeResults(e: Pick<Event, "id">) {
       .from(pairwiseVote)
       .where(eq(pairwiseVote.eventId, e.id)),
     db.select().from(prize).where(eq(prize.eventId, e.id)).orderBy(asc(prize.rank)),
+    db
+      .select({ id: userTable.id, name: userTable.name, username: userTable.username })
+      .from(eventJudge)
+      .innerJoin(userTable, eq(userTable.id, eventJudge.userId))
+      .where(eq(eventJudge.eventId, e.id))
+      .orderBy(asc(userTable.name)),
   ]);
 
-  const submitted = projects.filter((p) => p.status === "submitted");
+  const visibleProjects = EVENT_TRACKS_ENABLED
+    ? projects
+    : projects.map((entry) => ({ ...entry, trackId: null, trackName: null }));
+  const visiblePrizes = EVENT_REWARDS_ENABLED
+    ? EVENT_TRACKS_ENABLED
+      ? prizes
+      : prizes.filter((entry) => entry.kind !== "track")
+    : [];
+  const submitted = visibleProjects.filter((p) => p.status === "submitted");
   const submittedIds = new Set(submitted.map((p) => p.id));
-  const scored = scores.filter((s) => submittedIds.has(s.projectId));
+  const scored = individualScores.filter((s) => submittedIds.has(s.projectId));
+  const collective = collectiveScores.filter((s) => submittedIds.has(s.projectId));
+  const favoriteCount = new Map<string, number>();
+  for (const favorite of favorites) {
+    favoriteCount.set(favorite.projectId, (favoriteCount.get(favorite.projectId) ?? 0) + 1);
+  }
 
-  const rows = scored.map((s) => ({
-    judgeId: s.judgeId,
-    projectId: s.projectId,
-    raw: rawScore(s.criteria, criteria, s.favorite),
-  }));
-  const normalized = normalizeScores(rows);
+  const rows =
+    e.workflow === "innolab"
+      ? collective.map((s) => ({
+          judgeId: "collective",
+          projectId: s.projectId,
+          raw: collectiveRawScore(s.criteria, criteria, favoriteCount.get(s.projectId) ?? 0),
+        }))
+      : scored.map((s) => ({
+          judgeId: s.judgeId,
+          projectId: s.projectId,
+          raw: rawScore(s.criteria, criteria, s.favorite),
+        }));
+  const normalized =
+    e.workflow === "innolab"
+      ? rows.map((row) => ({ ...row, z: 0, normalized: row.raw }))
+      : normalizeScores(rows);
 
   const group = <T>(xs: T[], key: (x: T) => string) => {
     const m = new Map<string, T[]>();
@@ -98,6 +155,7 @@ export async function computeResults(e: Pick<Event, "id">) {
 
   const normByProject = group(normalized, (r) => r.projectId);
   const scoresByProject = group(scored, (s) => s.projectId);
+  const collectiveByProject = new Map(collective.map((s) => [s.projectId, s]));
   const voteTally = new Map(
     tally(votes.filter((v) => submittedIds.has(v.projectId))).map((t) => [t.projectId, t])
   );
@@ -110,11 +168,13 @@ export async function computeResults(e: Pick<Event, "id">) {
   const base = submitted.map((p) => {
     const norm = normByProject.get(p.id) ?? [];
     const marks = scoresByProject.get(p.id) ?? [];
+    const consensus = collectiveByProject.get(p.id);
     const perCriterion: Record<string, number | null> = {};
     for (const c of criteria) {
-      const xs = marks
-        .map((m) => m.criteria[c.key])
-        .filter((x): x is number => typeof x === "number");
+      const xs =
+        e.workflow === "innolab"
+          ? [consensus?.criteria[c.key]].filter((x): x is number => typeof x === "number")
+          : marks.map((m) => m.criteria[c.key]).filter((x): x is number => typeof x === "number");
       perCriterion[c.key] = xs.length ? mean(xs) : null;
     }
     const t = voteTally.get(p.id);
@@ -125,7 +185,12 @@ export async function computeResults(e: Pick<Event, "id">) {
       raw: norm.length ? mean(norm.map((r) => r.raw)) : null,
       normalized: norm.length ? mean(norm.map((r) => r.normalized)) : null,
       criteria: perCriterion,
-      favorites: marks.filter((mark) => mark.favorite).length,
+      favorites:
+        e.workflow === "innolab"
+          ? (favoriteCount.get(p.id) ?? 0)
+          : marks.filter((mark) => mark.favorite).length,
+      consensusComment: e.workflow === "innolab" ? (consensus?.comment ?? null) : null,
+      consensusRevision: e.workflow === "innolab" ? (consensus?.revision ?? null) : null,
       votes: t?.votes ?? 0,
       voters: t?.voters ?? 0,
       pairwise: b
@@ -147,8 +212,10 @@ export async function computeResults(e: Pick<Event, "id">) {
     (x) => x.votes
   );
   const trackRank = new Map<string, number>();
-  for (const [, inTrack] of group(base, (x) => x.trackId ?? "")) {
-    for (const [pid, r] of rankBy(inTrack, (x) => x.normalized)) trackRank.set(pid, r);
+  if (EVENT_TRACKS_ENABLED) {
+    for (const [, inTrack] of group(base, (x) => x.trackId ?? "")) {
+      for (const [pid, r] of rankBy(inTrack, (x) => x.normalized)) trackRank.set(pid, r);
+    }
   }
 
   // Prize allocation: overall prizes by judged rank, track prizes by rank within
@@ -163,7 +230,7 @@ export async function computeResults(e: Pick<Event, "id">) {
   };
   const byRank = (m: Map<string, number>, r: number, filter?: (id: string) => boolean) =>
     [...m.entries()].find(([pid, v]) => v === r && (!filter || filter(pid)))?.[0];
-  for (const pz of prizes) {
+  for (const pz of visiblePrizes) {
     if (pz.kind === "overall") award(byRank(rank, pz.rank), pz);
     else if (pz.kind === "community") award(byRank(communityRank, pz.rank), pz);
     else if (pz.kind === "track" && pz.trackId) {
@@ -193,7 +260,7 @@ export async function computeResults(e: Pick<Event, "id">) {
         .where(inArray(userTable.id, judgeIds))
     : [];
   const judgeById = new Map(judges.map((j) => [j.id, j]));
-  const stats = judgeStats(rows).map((s) => ({
+  const stats = (e.workflow === "innolab" ? [] : judgeStats(rows)).map((s) => ({
     ...s,
     name: judgeById.get(s.judgeId)?.name ?? s.judgeId,
     username: judgeById.get(s.judgeId)?.username ?? null,
@@ -201,12 +268,13 @@ export async function computeResults(e: Pick<Event, "id">) {
 
   return {
     criteria: criteria.map((c) => ({ key: c.key, label: c.label, weight: c.weight })),
-    prizes,
+    prizes: visiblePrizes,
     projects: results,
     judges: stats,
+    coaches,
     totals: {
       submitted: submitted.length,
-      scores: scored.length,
+      scores: e.workflow === "innolab" ? collective.length : scored.length,
       voters: new Set(votes.map((v) => v.voterKey)).size,
       comparisons: comparisons.length,
     },

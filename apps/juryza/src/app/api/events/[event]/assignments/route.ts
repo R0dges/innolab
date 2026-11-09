@@ -4,6 +4,7 @@ import { z } from "zod";
 import { balanced, batched, coverage } from "@/lib/assignment";
 import { assignment, db, project, score, user as userTable } from "@/lib/db";
 import { id } from "@/lib/ids";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { audit } from "@/lib/server/audit";
 import { loadManagedEvent } from "@/lib/server/events";
 import { handle, readBody } from "@/lib/server/http";
@@ -49,7 +50,11 @@ export const GET = handle<P>(async (req, { event: ref }) => {
   return {
     reviewsPerProject: e.reviewsPerProject,
     coverage: coverage(projects, rows, e.reviewsPerProject),
-    assignments: rows.map(({ scoreId, ...r }) => ({ ...r, scored: scoreId !== null })),
+    assignments: rows.map(({ scoreId, ...r }) => ({
+      ...r,
+      trackId: EVENT_TRACKS_ENABLED ? r.trackId : null,
+      scored: scoreId !== null,
+    })),
   };
 });
 

@@ -16,6 +16,7 @@ import {
   user as userTable,
   vote,
 } from "@/lib/db";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { computeResults } from "@/lib/server/results";
 
 /**
@@ -105,7 +106,7 @@ export async function buildDataset(
           "title",
           "tagline",
           "status",
-          "track",
+          ...(EVENT_TRACKS_ENABLED ? ["track"] : []),
           "team",
           "repo_url",
           "live_url",
@@ -119,7 +120,7 @@ export async function buildDataset(
           p.title,
           p.tagline,
           p.status,
-          trackName,
+          ...(EVENT_TRACKS_ENABLED ? [trackName] : []),
           teamName,
           p.repoUrl,
           p.liveUrl,
@@ -217,8 +218,7 @@ export async function buildDataset(
           "project_id",
           "title",
           "team",
-          "track",
-          "track_rank",
+          ...(EVENT_TRACKS_ENABLED ? ["track", "track_rank"] : []),
           "reviews",
           "favorites",
           "raw_mean",
@@ -235,8 +235,7 @@ export async function buildDataset(
           p.id,
           p.title,
           p.teamName,
-          p.trackName,
-          p.trackRank ?? "",
+          ...(EVENT_TRACKS_ENABLED ? [p.trackName, p.trackRank ?? ""] : []),
           p.reviews,
           p.favorites,
           fmt(p.raw),

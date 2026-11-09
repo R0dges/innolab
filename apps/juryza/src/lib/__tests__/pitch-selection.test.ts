@@ -18,32 +18,48 @@ describe("recommendedProjectRange", () => {
 });
 
 describe("selectRankedPitches", () => {
-  const candidates = [
-    { id: "pitch-a", authorId: "author-a", votes: 5 },
-    { id: "pitch-b", authorId: "author-b", votes: 3 },
-    { id: "pitch-c", authorId: "author-c", votes: 3 },
-    { id: "pitch-d", authorId: "author-d", votes: 3 },
-    { id: "pitch-e", authorId: "author-e", votes: 1 },
-  ];
+  const candidates = (votes: number[]) =>
+    votes.map((voteCount, index) => ({
+      id: `pitch-${index + 1}`,
+      authorId: `author-${index + 1}`,
+      votes: voteCount,
+      createdAt: new Date(`2026-01-0${index + 1}T09:00:00.000Z`),
+    }));
 
-  test("keeps higher vote totals and only draws at the cutoff tie", () => {
-    const result = selectRankedPitches(candidates, 3, "auditable-seed");
-    expect(result.selectedIds).toHaveLength(3);
-    expect(result.selectedIds[0]).toBe("pitch-a");
-    expect(result.tieCandidateIds).toEqual(
-      expect.arrayContaining(["pitch-b", "pitch-c", "pitch-d"])
-    );
-    expect(result.tieSelectedIds).toHaveLength(2);
+  test("selects the displayed leader for a 1-0 result", () => {
+    const result = selectRankedPitches(candidates([1, 0]), 1);
+    expect(result.ranked.map((candidate) => candidate.id)).toEqual(["pitch-1", "pitch-2"]);
+    expect(result.selectedIds).toEqual(["pitch-1"]);
+    expect(result.tieCandidateIds).toEqual([]);
   });
 
-  test("is reproducible for the same seed", () => {
-    expect(selectRankedPitches(candidates, 3, "same-seed").selectedIds).toEqual(
-      selectRankedPitches(candidates, 3, "same-seed").selectedIds
-    );
+  test("selects the first two displayed pitches for a 2-1-0 result", () => {
+    const result = selectRankedPitches(candidates([2, 1, 0]), 2);
+    expect(result.ranked.map((candidate) => candidate.id)).toEqual([
+      "pitch-1",
+      "pitch-2",
+      "pitch-3",
+    ]);
+    expect(result.selectedIds).toEqual(["pitch-1", "pitch-2"]);
+    expect(result.tieCandidateIds).toEqual([]);
+  });
+
+  test("requires a coach runoff when an equality crosses the cutoff", () => {
+    const result = selectRankedPitches(candidates([2, 1, 1, 0]), 2);
+    expect(result.selectedIds).toEqual(["pitch-1"]);
+    expect(result.tieCandidateIds).toEqual(["pitch-2", "pitch-3"]);
+    expect(result.tieSlots).toBe(1);
+  });
+
+  test("does not require a runoff when all tied pitches fit", () => {
+    const result = selectRankedPitches(candidates([2, 1, 1, 0]), 3);
+    expect(result.selectedIds).toEqual(["pitch-1", "pitch-2", "pitch-3"]);
+    expect(result.tieCandidateIds).toEqual([]);
   });
 
   test("rejects a quota outside the available pitches", () => {
-    expect(() => selectRankedPitches(candidates, 0, "seed")).toThrow(RangeError);
-    expect(() => selectRankedPitches(candidates, 6, "seed")).toThrow(RangeError);
+    const available = candidates([2, 1, 0]);
+    expect(() => selectRankedPitches(available, 0)).toThrow(RangeError);
+    expect(() => selectRankedPitches(available, 4)).toThrow(RangeError);
   });
 });

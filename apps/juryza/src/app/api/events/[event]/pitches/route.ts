@@ -1,7 +1,14 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { db, pitch, pitchVote, project, user as userTable } from "@/lib/db";
+import {
+  db,
+  pitch,
+  pitchTieBreakVote,
+  pitchVote,
+  project,
+  user as userTable,
+} from "@/lib/db";
 import { id } from "@/lib/ids";
 import {
   innolabProjectFormationIsOpen,
@@ -48,15 +55,17 @@ export const GET = handle<P>(async (req, { event: ref }) => {
       submittedAt: pitch.submittedAt,
       createdAt: pitch.createdAt,
       updatedAt: pitch.updatedAt,
-      votes: sql<number>`(select count(*)::int from ${pitchVote} where ${pitchVote.pitchId} = ${pitch.id})`,
+      votes: sql<number>`count(${pitchVote.id})::int`,
       projectId: sql<
         string | null
       >`(select ${project.id} from ${project} where ${project.pitchId} = ${pitch.id} limit 1)`,
     })
     .from(pitch)
     .innerJoin(userTable, eq(userTable.id, pitch.authorId))
+    .leftJoin(pitchVote, eq(pitchVote.pitchId, pitch.id))
     .where(eq(pitch.eventId, e.id))
-    .orderBy(asc(pitch.createdAt));
+    .groupBy(pitch.id, userTable.id)
+    .orderBy(asc(pitch.createdAt), asc(pitch.id));
 
   const myVotes = me
     ? new Set(
@@ -77,6 +86,42 @@ export const GET = handle<P>(async (req, { event: ref }) => {
     return canSeeSubmittedPitches && row.status !== "draft";
   });
   const selection = canCoach ? await pitchSelectionOverview(e.id) : null;
+  const tieBreak =
+    canCoach && e.pitchTieBreakRound && e.pitchTieBreakSlots
+      ? await Promise.all([
+          db
+            .select({
+              pitchId: pitchTieBreakVote.pitchId,
+              votes: sql<number>`count(*)::int`,
+            })
+            .from(pitchTieBreakVote)
+            .where(
+              and(
+                eq(pitchTieBreakVote.eventId, e.id),
+                eq(pitchTieBreakVote.round, e.pitchTieBreakRound)
+              )
+            )
+            .groupBy(pitchTieBreakVote.pitchId),
+          me
+            ? db
+                .select({ pitchId: pitchTieBreakVote.pitchId })
+                .from(pitchTieBreakVote)
+                .where(
+                  and(
+                    eq(pitchTieBreakVote.eventId, e.id),
+                    eq(pitchTieBreakVote.round, e.pitchTieBreakRound),
+                    eq(pitchTieBreakVote.coachId, me.userId)
+                  )
+                )
+            : Promise.resolve([]),
+        ]).then(([totals, mine]) => ({
+          round: e.pitchTieBreakRound as number,
+          candidatePitchIds: e.pitchTieBreakCandidateIds,
+          slots: e.pitchTieBreakSlots as number,
+          totals,
+          myPitchIds: mine.map((row) => row.pitchId),
+        }))
+      : null;
 
   return {
     event: {
@@ -103,6 +148,7 @@ export const GET = handle<P>(async (req, { event: ref }) => {
           registered: rights.registered,
           canManage: rights.manager,
           canCoach,
+          canCoachVote: rights.panelJudge || e.createdBy === me.userId,
           canCreate: rights.canPropose && pitchSubmissionsAreOpen(e) && !hasOwnPitch,
           canVote: rights.canVote && votingOpen,
         }
@@ -123,6 +169,7 @@ export const GET = handle<P>(async (req, { event: ref }) => {
           finalized: Boolean(e.pitchSelectionFinalizedAt),
           count: e.pitchSelectionCount,
           finalizedAt: e.pitchSelectionFinalizedAt,
+          tieBreak,
         }
       : null,
   };

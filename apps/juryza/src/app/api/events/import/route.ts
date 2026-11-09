@@ -1,8 +1,9 @@
 import type { NextRequest } from "next/server";
 
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { audit } from "@/lib/server/audit";
 import { bundleSchema, importBundle } from "@/lib/server/bundle";
-import { created, handle, readBody } from "@/lib/server/http";
+import { badRequest, created, handle, readBody } from "@/lib/server/http";
 import { requireRole } from "@/lib/server/identity";
 
 /**
@@ -14,6 +15,14 @@ import { requireRole } from "@/lib/server/identity";
 export const POST = handle(async (req: NextRequest) => {
   const me = await requireRole(req, "organizer");
   const bundle = await readBody(req, bundleSchema);
+  const containsTracks =
+    bundle.tracks.length > 0 ||
+    bundle.prizes.some((entry) => entry.kind === "track" || Boolean(entry.track)) ||
+    bundle.judges.some((judge) => judge.tracks.length > 0) ||
+    bundle.projects.some((project) => Boolean(project.track));
+  if (!EVENT_TRACKS_ENABLED && containsTracks) {
+    throw badRequest("Les axes sont désactivés. Retirez les axes du fichier avant de l’importer.");
+  }
   const report = await importBundle(bundle, { createdBy: me.userId, visibility: "draft" });
   await audit({
     eventId: report.eventId,

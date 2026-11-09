@@ -3,9 +3,10 @@ import { z } from "zod";
 
 import { db, track } from "@/lib/db";
 import { id } from "@/lib/ids";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { audit } from "@/lib/server/audit";
 import { loadEvent, loadManagedEvent } from "@/lib/server/events";
-import { handle, readBody } from "@/lib/server/http";
+import { handle, notFound, readBody } from "@/lib/server/http";
 import { requireUser, resolveIdentity } from "@/lib/server/identity";
 
 type P = { event: string };
@@ -22,6 +23,7 @@ const list = (eventId: string) =>
 
 export const GET = handle<P>(async (req, { event: ref }) => {
   const e = await loadEvent(ref, await resolveIdentity(req));
+  if (!EVENT_TRACKS_ENABLED) return { tracks: [] };
   return { tracks: await list(e.id) };
 });
 
@@ -40,6 +42,7 @@ const body = z.object({
 export const PUT = handle<P>(async (req, { event: ref }) => {
   const me = await requireUser(req);
   const e = await loadManagedEvent(ref, me);
+  if (!EVENT_TRACKS_ENABLED) throw notFound("Les axes sont désactivés");
   const { tracks } = await readBody(req, body);
 
   await db.transaction(async (tx) => {

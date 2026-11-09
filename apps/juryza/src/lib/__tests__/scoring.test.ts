@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
-import { judgeStats, normalizeScores, rawScore, type ScoreRow, toScoreRows } from "@/lib/scoring";
+import {
+  collectiveRawScore,
+  judgeStats,
+  normalizeScores,
+  rawScore,
+  type ScoreRow,
+  toScoreRows,
+} from "@/lib/scoring";
 
 const rubric = [
   { key: "impact", weight: 0.3 },
@@ -85,6 +92,15 @@ describe("rawScore", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0]?.raw).toBeCloseTo(3.95 + 0.25, 10);
+  });
+});
+
+describe("collectiveRawScore", () => {
+  test("adds every coach favourite before the criterion average", () => {
+    const criteria = ["a", "b", "c", "d", "e", "f"].map((key) => ({ key, weight: 1 }));
+    const marks = Object.fromEntries(criteria.map(({ key }) => [key, 4]));
+    expect(collectiveRawScore(marks, criteria, 0)).toBe(4);
+    expect(collectiveRawScore(marks, criteria, 2)).toBeCloseTo(4 + 2 / 6, 10);
   });
 });
 

@@ -51,3 +51,13 @@ export function eventRegistrationIsOpen(event: InnolabDates, now = Date.now()): 
 export function innolabProjectFormationIsOpen(event: InnolabDates, now = Date.now()): boolean {
   return pitchVotingHasClosed(event, now) && projectSubmissionsAreOpen(event, now);
 }
+
+/** Tuesday 23:59 cutoff, represented as Wednesday 00:00 in the event calendar. */
+export function innolabRosterChangesRequireCoach(event: InnolabDates, now = Date.now()): boolean {
+  if (!isInnolab(event)) return false;
+  const start = event.pitchSubmissionsOpen ? new Date(event.pitchSubmissionsOpen) : null;
+  if (!start || Number.isNaN(start.getTime())) return false;
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() + 2);
+  return now >= start.getTime();
+}

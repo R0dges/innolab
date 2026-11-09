@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * /manage/new — the create-event wizard: basics → schedule → tracks → rules →
- * review. Creates the event with POST /api/events (a draft unless "Publish
+ * /manage/new — the create-event wizard: basics → schedule → rules → review.
+ * Creates the event with POST /api/events (a draft unless "Publish
  * immediately" is ticked) and opens its console.
  */
 
@@ -16,14 +16,16 @@ import {
   ArrowRight,
   CalendarClock,
   Check,
+  FileSearch,
   Globe,
   Laptop,
+  Link2,
   MapPin,
   Plus,
   Rocket,
   ShieldAlert,
   Sparkles,
-  Tags,
+  Trash2,
   UsersRound,
   Vote,
   X,
@@ -31,7 +33,6 @@ import {
 import { toast } from "sonner";
 
 import { Alert, AlertDescription, AlertTitle } from "@juryza/ui/components/ui/alert";
-import { Badge } from "@juryza/ui/components/ui/badge";
 import { Button } from "@juryza/ui/components/ui/button";
 import {
   Card,
@@ -97,6 +98,13 @@ import { hasAtLeast } from "@/lib/roles";
 
 type Access = "authenticated" | "email" | "open";
 
+interface ResourceLinkDraft {
+  key: string;
+  name: string;
+  category: string;
+  url: string;
+}
+
 interface Draft {
   name: string;
   slug: string;
@@ -112,40 +120,30 @@ interface Draft {
   pitchVotingClose: string;
   submissionsOpen: string;
   submissionsClose: string;
+  judgingOpen: string;
   judgingClose: string;
   votingOpen: string;
   votingClose: string;
-  tracks: string[];
   maxTeamSize: number;
   reviewsPerProject: number;
   votingAccess: Access;
   domains: string;
   voteBudget: number;
+  auditTitle: string;
+  auditUrl: string;
+  resourceLinks: ResourceLinkDraft[];
   publish: boolean;
 }
 
 const STEPS = [
   { key: "basics", label: "Informations", icon: Sparkles },
   { key: "schedule", label: "Calendrier", icon: CalendarClock },
-  { key: "tracks", label: "Axes", icon: Tags },
   { key: "rules", label: "Règles", icon: UsersRound },
+  { key: "resources", label: "Audit et ressources", icon: FileSearch },
   { key: "review", label: "Vérification", icon: Rocket },
 ] as const;
 
 const HUES = [250, 285, 320, 10, 45, 150, 185, 215];
-const TRACK_SUGGESTIONS = [
-  "Intelligence artificielle",
-  "Outils internes",
-  "Climat",
-  "Santé",
-  "Formation",
-  "Accessibilité",
-  "Sécurité",
-  "Impact social",
-  "Processus métier",
-  "Qualité de service",
-];
-
 const slugify = (s: string) =>
   s
     .toLowerCase()
@@ -180,6 +178,7 @@ type Schedule = Pick<
   | "pitchVotingClose"
   | "submissionsOpen"
   | "submissionsClose"
+  | "judgingOpen"
   | "judgingClose"
   | "votingOpen"
   | "votingClose"
@@ -200,6 +199,7 @@ function innolabWeekPreset(): Schedule {
     pitchVotingClose: toLocalInput(pitchVotingClose),
     submissionsOpen: toLocalInput(submissionsOpen),
     submissionsClose: toLocalInput(submissionsClose),
+    judgingOpen: toLocalInput(submissionsClose),
     judgingClose: toLocalInput(addHours(submissionsClose, 2)),
     votingOpen: "",
     votingClose: "",
@@ -233,19 +233,31 @@ const initial = (): Draft => ({
   pitchVotingClose: "",
   submissionsOpen: "",
   submissionsClose: "",
+  judgingOpen: "",
   judgingClose: "",
   votingOpen: "",
   votingClose: "",
-  tracks: [],
   maxTeamSize: 6,
   reviewsPerProject: 3,
   votingAccess: "authenticated",
   domains: "",
   voteBudget: 16,
+  auditTitle: "Audit initial de l’organisation",
+  auditUrl: "",
+  resourceLinks: [],
   publish: false,
 });
 
-type Errors = Partial<Record<keyof Draft, string>>;
+type Errors = Partial<Record<string, string>>;
+
+const isHttpUrl = (value: string) => {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+};
 
 function validate(step: number, d: Draft): Errors {
   const e: Errors = {};
@@ -266,7 +278,8 @@ function validate(step: number, d: Draft): Errors {
     const pitchVoteClose = time(d.pitchVotingClose);
     const open = time(d.submissionsOpen);
     const close = time(d.submissionsClose);
-    const judging = time(d.judgingClose);
+    const judgingOpen = time(d.judgingOpen);
+    const judgingClose = time(d.judgingClose);
     const vOpen = time(d.votingOpen);
     const vClose = time(d.votingClose);
     if (d.workflow === "innolab") {
@@ -285,19 +298,34 @@ function validate(step: number, d: Draft): Errors {
     if (close === null) e.submissionsClose = "La fin des projets est obligatoire";
     if (open !== null && close !== null && open >= close)
       e.submissionsClose = "Doit être postérieure au début des projets";
-    if (judging !== null && close !== null && judging <= close)
+    if (judgingOpen !== null && close !== null && judgingOpen < close)
+      e.judgingOpen = "L’évaluation doit commencer après la fin des projets";
+    if (judgingOpen !== null && judgingClose !== null && judgingClose <= judgingOpen)
+      e.judgingClose = "La délibération doit se terminer après le début des évaluations";
+    if (judgingOpen === null && judgingClose !== null && close !== null && judgingClose <= close)
       e.judgingClose = "L’évaluation doit se terminer après la fin des projets";
     if (d.workflow === "standard" && vOpen !== null && vClose !== null && vOpen >= vClose)
       e.votingClose = "Must be after voting opens";
     if (d.workflow === "standard" && vClose !== null && close !== null && vClose <= close)
       e.votingClose = "Voting should close after the submission deadline";
   }
-  if (step === 3) {
+  if (step === 2) {
     if (d.reviewsPerProject < 1 || d.reviewsPerProject > 10)
       e.reviewsPerProject = "Between 1 and 10";
     if (d.voteBudget < 1 || d.voteBudget > 400) e.voteBudget = "Between 1 and 400";
     if (d.workflow === "standard" && d.votingAccess === "email" && !parseDomains(d.domains).length)
       e.domains = "Add at least one allowed email domain";
+  }
+  if (step === 3) {
+    if (d.auditUrl && !d.auditTitle.trim()) e.auditTitle = "Indiquez le titre du document";
+    if (d.auditUrl && !isHttpUrl(d.auditUrl)) e.auditUrl = "Utilisez un lien HTTP(S) valide";
+    for (const resource of d.resourceLinks) {
+      if (!resource.name.trim()) e[`resource-${resource.key}-name`] = "Indiquez un nom";
+      if (!resource.category.trim())
+        e[`resource-${resource.key}-category`] = "Indiquez une catégorie";
+      if (!isHttpUrl(resource.url))
+        e[`resource-${resource.key}-url`] = "Utilisez un lien HTTP(S) valide";
+    }
   }
   return e;
 }
@@ -320,14 +348,16 @@ export default function NewEventPage() {
 
   // Default schedule is computed in the browser (local timezone), not during SSR.
   useEffect(() => {
-    setD((prev) =>
-      prev.submissionsClose ? prev : { ...prev, ...innolabWeekPreset() }
-    );
+    setD((prev) => (prev.submissionsClose ? prev : { ...prev, ...innolabWeekPreset() }));
   }, []);
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => {
     setD((prev) => ({ ...prev, [k]: v }));
-    setErrors((prev) => ({ ...prev, [k]: undefined }));
+    setErrors((prev) =>
+      k === "resourceLinks"
+        ? Object.fromEntries(Object.entries(prev).filter(([key]) => !key.startsWith("resource-")))
+        : { ...prev, [k]: undefined }
+    );
   };
 
   const create = useMutation({
@@ -347,15 +377,33 @@ export default function NewEventPage() {
         pitchVotingClose: d.workflow === "innolab" ? iso(d.pitchVotingClose) : null,
         submissionsOpen: iso(d.submissionsOpen),
         submissionsClose: iso(d.submissionsClose),
+        judgingOpen: iso(d.judgingOpen),
         judgingClose: iso(d.judgingClose),
         votingOpen: d.workflow === "standard" ? iso(d.votingOpen) : null,
         votingClose: d.workflow === "standard" ? iso(d.votingClose) : null,
-        tracks: d.tracks,
+        tracks: [],
         maxTeamSize: 6,
         reviewsPerProject: d.reviewsPerProject,
         votingAccess: d.votingAccess,
         votingEmailDomains: d.votingAccess === "email" ? parseDomains(d.domains) : [],
         voteBudget: d.voteBudget,
+        auditDocument: d.auditUrl
+          ? {
+              title: d.auditTitle.trim(),
+              url: d.auditUrl.trim(),
+              findings: [],
+              problems: [],
+            }
+          : undefined,
+        resources: d.resourceLinks.map((resource, position) => ({
+          kind: "accessible",
+          name: resource.name.trim(),
+          category: resource.category.trim(),
+          url: resource.url.trim(),
+          accessLevel: "event",
+          availability: "available",
+          position,
+        })),
       }),
     onSuccess: async (res) => {
       toast.success(d.publish ? "Événement créé et publié" : "Brouillon créé");
@@ -401,8 +449,8 @@ export default function NewEventPage() {
           </EmptyMedia>
           <EmptyTitle>Rôle de coach nécessaire</EmptyTitle>
           <EmptyDescription>
-            Seuls les coachs peuvent créer et conduire un événement. Un administrateur peut attribuer
-            ce rôle à votre compte.
+            Seuls les coachs peuvent créer et conduire un événement. Un administrateur peut
+            attribuer ce rôle à votre compte.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -439,8 +487,8 @@ export default function NewEventPage() {
           <CardContent>
             {step === 0 && <BasicsStep d={d} set={set} errors={errors} />}
             {step === 1 && <ScheduleStep d={d} set={set} setD={setD} errors={errors} />}
-            {step === 2 && <TracksStep d={d} set={set} />}
-            {step === 3 && <RulesStep d={d} set={set} errors={errors} />}
+            {step === 2 && <RulesStep d={d} set={set} errors={errors} />}
+            {step === 3 && <AuditResourcesStep d={d} set={set} errors={errors} />}
             {step === 4 && <ReviewStep d={d} set={set} onEdit={setStep} />}
             {serverError && step === 4 && (
               <Alert variant="destructive" className="mt-6">
@@ -502,16 +550,6 @@ export default function NewEventPage() {
                   Fin des projets : {formatDateTime(new Date(d.submissionsClose))}
                 </p>
               )}
-              {d.tracks.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {d.tracks.slice(0, 4).map((t) => (
-                    <Badge key={t} variant="secondary">
-                      {t}
-                    </Badge>
-                  ))}
-                  {d.tracks.length > 4 && <Badge variant="outline">+{d.tracks.length - 4}</Badge>}
-                </div>
-              )}
             </CardContent>
           </Card>
           <p className="text-muted-foreground font-mono text-xs break-all">
@@ -526,8 +564,8 @@ export default function NewEventPage() {
 const STEP_HELP = [
   "Nommez l’événement, indiquez son format et personnalisez sa couverture.",
   "Planifiez la préparation des pitchs, leur évaluation, les projets et leur évaluation finale.",
-  "Les axes permettent de regrouper les projets. Ils restent facultatifs.",
   "Définissez la taille des groupes et les règles d’évaluation des projets.",
+  "Ajoutez le document d’audit de référence et organisez les liens utiles pour les équipes.",
   "Vérifiez les informations avant de créer l’événement.",
 ];
 
@@ -904,8 +942,16 @@ function ScheduleStep({
           />
         </div>
         <DateField
+          id="judgingOpen"
+          label="Ouverture de l’évaluation des projets"
+          hint="Faites-la coïncider avec le début des présentations finales."
+          value={d.judgingOpen}
+          onChange={(v) => set("judgingOpen", v)}
+          error={errors.judgingOpen}
+        />
+        <DateField
           id="judgingClose"
-          label="Fin de l’évaluation des projets"
+          label="Clôture des délibérations"
           hint="Les coachs ne peuvent plus modifier leurs évaluations après cette date."
           value={d.judgingClose}
           onChange={(v) => set("judgingClose", v)}
@@ -934,82 +980,6 @@ function ScheduleStep({
       <p className="text-muted-foreground text-xs">
         Les horaires utilisent votre fuseau ({tz}) et sont enregistrés en UTC.
       </p>
-    </div>
-  );
-}
-
-function TracksStep({ d, set }: { d: Draft; set: SetFn }) {
-  const [value, setValue] = useState("");
-  const add = (name: string) => {
-    const t = name.trim().slice(0, 60);
-    if (!t || d.tracks.some((x) => x.toLowerCase() === t.toLowerCase()) || d.tracks.length >= 30)
-      return;
-    set("tracks", [...d.tracks, t]);
-  };
-  return (
-    <div className="flex flex-col gap-6">
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          add(value);
-          setValue("");
-        }}
-      >
-        <Input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="Ajouter un axe, par ex. Qualité de service"
-          aria-label="Nom de l’axe"
-          maxLength={60}
-        />
-        <Button type="submit" variant="outline" disabled={!value.trim()}>
-          <Plus /> Ajouter
-        </Button>
-      </form>
-
-      {d.tracks.length ? (
-        <div className="flex flex-wrap gap-2">
-          {d.tracks.map((t) => (
-            <span
-              key={t}
-              className="bg-secondary text-secondary-foreground inline-flex items-center gap-1 rounded-full py-1 pr-1 pl-3 text-sm"
-            >
-              {t}
-              <button
-                type="button"
-                aria-label={`Retirer ${t}`}
-                onClick={() =>
-                  set(
-                    "tracks",
-                    d.tracks.filter((x) => x !== t)
-                  )
-                }
-                className="hover:bg-foreground/10 focus-visible:ring-ring/50 grid size-5 place-items-center rounded-full outline-none focus-visible:ring-2"
-              >
-                <X className="size-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-      ) : (
-        <p className="text-muted-foreground rounded-lg border border-dashed p-4 text-center text-sm">
-          Aucun axe — tous les projets resteront dans le même ensemble.
-        </p>
-      )}
-
-      <div className="flex flex-col gap-2">
-        <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-          Suggestions
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {TRACK_SUGGESTIONS.filter((s) => !d.tracks.includes(s)).map((s) => (
-            <Button key={s} variant="outline" size="sm" onClick={() => add(s)}>
-              <Plus /> {s}
-            </Button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
@@ -1162,6 +1132,186 @@ function RulesStep({ d, set, errors }: { d: Draft; set: SetFn; errors: Errors })
   );
 }
 
+function AuditResourcesStep({ d, set, errors }: { d: Draft; set: SetFn; errors: Errors }) {
+  const updateResource = (key: string, patch: Partial<ResourceLinkDraft>) =>
+    set(
+      "resourceLinks",
+      d.resourceLinks.map((resource) =>
+        resource.key === key ? { ...resource, ...patch } : resource
+      )
+    );
+  const addResource = () =>
+    set("resourceLinks", [
+      ...d.resourceLinks,
+      {
+        key: crypto.randomUUID(),
+        name: "",
+        category: "Documentation",
+        url: "",
+      },
+    ]);
+
+  return (
+    <div className="flex flex-col gap-8">
+      <section className="flex flex-col gap-4">
+        <div className="flex items-start gap-3">
+          <span className="bg-primary/10 text-primary grid size-9 shrink-0 place-items-center rounded-lg">
+            <FileSearch className="size-4" />
+          </span>
+          <div>
+            <h3 className="font-semibold">Document d’audit de référence</h3>
+            <p className="text-muted-foreground text-sm">
+              Ce document donne le contexte de départ aux participants et aux coachs. Il reste
+              facultatif lors de la création.
+            </p>
+          </div>
+        </div>
+        <div className="grid gap-4 rounded-xl border p-4 sm:grid-cols-[minmax(12rem,0.8fr)_minmax(16rem,1.2fr)]">
+          <Field data-invalid={Boolean(errors.auditTitle)}>
+            <FieldLabel htmlFor="audit-title">Titre</FieldLabel>
+            <Input
+              id="audit-title"
+              value={d.auditTitle}
+              maxLength={120}
+              placeholder="Audit initial de l’organisation"
+              onChange={(event) => set("auditTitle", event.target.value)}
+            />
+            {errors.auditTitle && <FieldError>{errors.auditTitle}</FieldError>}
+          </Field>
+          <Field data-invalid={Boolean(errors.auditUrl)}>
+            <FieldLabel htmlFor="audit-url">Lien vers le document</FieldLabel>
+            <Input
+              id="audit-url"
+              type="url"
+              inputMode="url"
+              value={d.auditUrl}
+              placeholder="https://sharepoint.example/audit"
+              onChange={(event) => set("auditUrl", event.target.value)}
+            />
+            {errors.auditUrl ? (
+              <FieldError>{errors.auditUrl}</FieldError>
+            ) : (
+              <FieldDescription>
+                SharePoint, Google Drive, Notion ou autre lien HTTP(S).
+              </FieldDescription>
+            )}
+          </Field>
+        </div>
+      </section>
+
+      <Separator />
+
+      <section className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="bg-muted text-muted-foreground grid size-9 shrink-0 place-items-center rounded-lg">
+              <Link2 className="size-4" />
+            </span>
+            <div>
+              <h3 className="font-semibold">Liens documentaires disponibles</h3>
+              <p className="text-muted-foreground text-sm">
+                Ajoutez uniquement les ressources réellement accessibles aux équipes. Vous pourrez
+                compléter la liste après la création.
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addResource}
+            disabled={d.resourceLinks.length >= 30}
+          >
+            <Plus /> Ajouter un lien
+          </Button>
+        </div>
+
+        {d.resourceLinks.length ? (
+          <ol className="flex flex-col gap-3">
+            {d.resourceLinks.map((resource, index) => (
+              <li key={resource.key} className="grid gap-3 rounded-xl border p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium">Ressource {index + 1}</p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Supprimer ${resource.name || `la ressource ${index + 1}`}`}
+                    onClick={() =>
+                      set(
+                        "resourceLinks",
+                        d.resourceLinks.filter((item) => item.key !== resource.key)
+                      )
+                    }
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+                <div className="grid gap-4 md:grid-cols-[minmax(12rem,1fr)_12rem]">
+                  <Field data-invalid={Boolean(errors[`resource-${resource.key}-name`])}>
+                    <FieldLabel htmlFor={`resource-name-${resource.key}`}>Nom</FieldLabel>
+                    <Input
+                      id={`resource-name-${resource.key}`}
+                      value={resource.name}
+                      maxLength={120}
+                      placeholder="Base documentaire du challenge"
+                      onChange={(event) =>
+                        updateResource(resource.key, { name: event.target.value })
+                      }
+                    />
+                    {errors[`resource-${resource.key}-name`] && (
+                      <FieldError>{errors[`resource-${resource.key}-name`]}</FieldError>
+                    )}
+                  </Field>
+                  <Field data-invalid={Boolean(errors[`resource-${resource.key}-category`])}>
+                    <FieldLabel htmlFor={`resource-category-${resource.key}`}>Catégorie</FieldLabel>
+                    <Input
+                      id={`resource-category-${resource.key}`}
+                      value={resource.category}
+                      maxLength={80}
+                      placeholder="Documentation"
+                      onChange={(event) =>
+                        updateResource(resource.key, { category: event.target.value })
+                      }
+                    />
+                    {errors[`resource-${resource.key}-category`] && (
+                      <FieldError>{errors[`resource-${resource.key}-category`]}</FieldError>
+                    )}
+                  </Field>
+                </div>
+                <Field data-invalid={Boolean(errors[`resource-${resource.key}-url`])}>
+                  <FieldLabel htmlFor={`resource-url-${resource.key}`}>Lien</FieldLabel>
+                  <Input
+                    id={`resource-url-${resource.key}`}
+                    type="url"
+                    inputMode="url"
+                    value={resource.url}
+                    placeholder="https://…"
+                    onChange={(event) => updateResource(resource.key, { url: event.target.value })}
+                  />
+                  {errors[`resource-${resource.key}-url`] && (
+                    <FieldError>{errors[`resource-${resource.key}-url`]}</FieldError>
+                  )}
+                </Field>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="border-muted-foreground/25 flex flex-col items-center gap-3 rounded-xl border border-dashed px-4 py-8 text-center">
+            <Link2 className="text-muted-foreground size-5" />
+            <div>
+              <p className="text-sm font-medium">Aucun lien ajouté</p>
+              <p className="text-muted-foreground text-sm">
+                Cette étape peut rester vide si les ressources ne sont pas encore prêtes.
+              </p>
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function ReviewStep({ d, set, onEdit }: { d: Draft; set: SetFn; onEdit: (step: number) => void }) {
   const dt = (v: string) => (v ? formatDateTime(new Date(v)) : "—");
   const groups: { step: number; title: string; rows: [string, React.ReactNode][] }[] = [
@@ -1192,18 +1342,27 @@ function ReviewStep({ d, set, onEdit }: { d: Draft; set: SetFn; onEdit: (step: n
         ["Évaluation des pitchs", `${dt(d.pitchVotingOpen)} → ${dt(d.pitchVotingClose)}`],
         ["Début des projets", d.submissionsOpen ? dt(d.submissionsOpen) : "Immédiatement"],
         ["Fin des projets", dt(d.submissionsClose)],
+        ["Ouverture des évaluations", dt(d.judgingOpen)],
         ["Fin des évaluations", dt(d.judgingClose)],
       ],
     },
     {
       step: 2,
-      title: "Axes",
-      rows: [["Axes", d.tracks.length ? d.tracks.join(", ") : "Aucun"]],
+      title: "Règles",
+      rows: [["Participants par projet", "5 à 6 (maximum 6)"]],
     },
     {
       step: 3,
-      title: "Règles",
-      rows: [["Participants par projet", "5 à 6 (maximum 6)"]],
+      title: "Audit et ressources",
+      rows: [
+        ["Audit de référence", d.auditUrl ? d.auditTitle : "Non renseigné"],
+        [
+          "Liens disponibles",
+          d.resourceLinks.length
+            ? d.resourceLinks.map((resource) => resource.name || "Lien sans nom").join(", ")
+            : "Aucun",
+        ],
+      ],
     },
   ];
   return (

@@ -72,6 +72,7 @@ import { cn } from "@juryza/ui/lib/utils";
 import { PageHeader, StatCard } from "@/components/page";
 import { api } from "@/lib/api";
 import { formatNumber, pluralize } from "@/lib/format";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { eventKey, useEvent } from "@/lib/queries";
 
 /**
@@ -317,11 +318,13 @@ export default function AssignmentsPage() {
               <span className="text-foreground font-medium">Conflicts of interest.</span> A judge is
               never assigned a project built by a team they belong to.
             </p>
-            <p>
-              <span className="text-foreground font-medium">Track eligibility.</span> Judges limited
-              to certain tracks only get projects from those tracks — and the API re-checks this
-              when they score.
-            </p>
+            {EVENT_TRACKS_ENABLED && (
+              <p>
+                <span className="text-foreground font-medium">Track eligibility.</span> Judges
+                limited to certain tracks only get projects from those tracks — and the API
+                re-checks this when they score.
+              </p>
+            )}
             <p>
               <span className="text-foreground font-medium">Idempotent.</span> Existing assignments
               count toward each project's target and each judge's load, so re-running tops up
@@ -418,8 +421,8 @@ function PlanPreview({ plan }: { plan: Plan }) {
         <p className="text-muted-foreground flex items-start gap-2 text-xs">
           <TriangleAlert className="text-warning mt-px size-3.5 shrink-0" />
           {pluralize(c.underCovered.length, "project")} would still be below{" "}
-          {plan.reviewsPerProject} reviews — usually too few eligible judges in that track, or
-          conflicts of interest. Add judges or lower the target.
+          {plan.reviewsPerProject} reviews — usually too few eligible judges or conflicts of
+          interest. Add judges or lower the target.
         </p>
       ) : (
         <p className="text-muted-foreground flex items-center gap-2 text-xs">
@@ -485,7 +488,7 @@ function ProjectCoverage({
           <TableHeader>
             <TableRow>
               <TableHead className="pl-4">Project</TableHead>
-              <TableHead>Track</TableHead>
+              {EVENT_TRACKS_ENABLED && <TableHead>Track</TableHead>}
               <TableHead className="text-right">Assigned / target</TableHead>
               <TableHead className="text-right">Scored</TableHead>
               <TableHead>Judges</TableHead>
@@ -500,9 +503,11 @@ function ProjectCoverage({
                     {p.title}
                   </Link>
                 </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {p.trackId ? (trackName.get(p.trackId) ?? "—") : "—"}
-                </TableCell>
+                {EVENT_TRACKS_ENABLED && (
+                  <TableCell className="text-muted-foreground">
+                    {p.trackId ? (trackName.get(p.trackId) ?? "—") : "—"}
+                  </TableCell>
+                )}
                 <TableCell className="text-right tabular-nums">
                   <span className={cn(p.assigned < target && "text-destructive font-medium")}>
                     {p.assigned}

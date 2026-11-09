@@ -55,6 +55,19 @@ export function rawScore(
   return acc / weightSum + bonus;
 }
 
+/**
+ * Innovation Lab uses one consensus grid per project. Each coach's personal
+ * coup de cœur adds one point to the rubric total before the average, i.e.
+ * `1 / criterion count` on the final 1–5 scale.
+ */
+export function collectiveRawScore(
+  criteria: Record<string, number>,
+  rubric: WeightedCriterion[],
+  favoriteCount = 0
+): number {
+  return rawScore(criteria, rubric) + Math.max(0, favoriteCount) * favoriteBonus(rubric);
+}
+
 function mean(xs: number[]): number {
   if (xs.length === 0) return 0;
   return xs.reduce((a, b) => a + b, 0) / xs.length;

@@ -3,8 +3,8 @@ import { and, eq, isNull } from "drizzle-orm";
 import { calendarSubscription, db, event, user as userTable } from "@/lib/db";
 import { canAccessPersonalCalendar } from "@/lib/schedule";
 import { viewerForEvent } from "@/lib/server/events";
-import { calendarResponse } from "@/lib/server/ical";
 import { handle, notFound } from "@/lib/server/http";
+import { calendarResponse } from "@/lib/server/ical";
 import { hashToken, type Identity } from "@/lib/server/identity";
 import { scheduleForEvent } from "@/lib/server/schedule";
 
@@ -24,6 +24,7 @@ export const GET = handle<P>(async (req, { token: tokenWithExtension }) => {
       name: userTable.name,
       username: userTable.username,
       image: userTable.image,
+      location: userTable.location,
       banned: userTable.banned,
     })
     .from(calendarSubscription)
@@ -44,6 +45,7 @@ export const GET = handle<P>(async (req, { token: tokenWithExtension }) => {
     name: row.name,
     username: row.username,
     image: row.image,
+    location: row.location,
   };
   const viewer = await viewerForEvent(row.event, identity);
   if (!canAccessPersonalCalendar(viewer)) throw notFound("Calendar not found");

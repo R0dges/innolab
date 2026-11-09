@@ -1,16 +1,16 @@
-import { createHash } from "node:crypto";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db, eventJudge, pitch, registration, user as userTable } from "@/lib/db";
 
 export const MIN_PROJECT_MEMBERS = 5;
 export const MAX_PROJECT_MEMBERS = 6;
-export const PITCH_SELECTION_ALGORITHM = "votes-desc-sha256-tie-v1";
+export const PITCH_SELECTION_ALGORITHM = "participant-votes-desc-coach-runoff-v2";
 
 export type PitchSelectionCandidate = {
   id: string;
   authorId: string;
   votes: number;
+  createdAt: Date;
 };
 
 export function recommendedProjectRange(participantCount: number) {
@@ -22,14 +22,9 @@ export function recommendedProjectRange(participantCount: number) {
   };
 }
 
-function tieBreakKey(seed: string, pitchId: string) {
-  return createHash("sha256").update(`${seed}:${pitchId}`).digest("hex");
-}
-
 export function selectRankedPitches<Candidate extends PitchSelectionCandidate>(
   candidates: Candidate[],
-  count: number,
-  seed: string
+  count: number
 ) {
   if (!Number.isInteger(count) || count < 1 || count > candidates.length) {
     throw new RangeError("The requested pitch count is outside the available candidates");
@@ -38,14 +33,15 @@ export function selectRankedPitches<Candidate extends PitchSelectionCandidate>(
   const ranked = candidates.toSorted(
     (left, right) =>
       right.votes - left.votes ||
-      tieBreakKey(seed, left.id).localeCompare(tieBreakKey(seed, right.id)) ||
+      left.createdAt.getTime() - right.createdAt.getTime() ||
       left.id.localeCompare(right.id)
   );
-  const selected = ranked.slice(0, count);
-  const cutoffVotes = selected.at(-1)?.votes ?? 0;
+  const cutoffVotes = ranked[count - 1]?.votes ?? 0;
+  const selectedBeforeCutoff = ranked.filter((candidate) => candidate.votes > cutoffVotes);
   const candidatesAtCutoff = ranked.filter((candidate) => candidate.votes === cutoffVotes);
-  const selectedAtCutoff = selected.filter((candidate) => candidate.votes === cutoffVotes);
-  const tieAtCutoff = candidatesAtCutoff.length > selectedAtCutoff.length;
+  const slotsAtCutoff = count - selectedBeforeCutoff.length;
+  const tieAtCutoff = candidatesAtCutoff.length > slotsAtCutoff;
+  const selected = tieAtCutoff ? selectedBeforeCutoff : ranked.slice(0, count);
 
   return {
     ranked,
@@ -53,7 +49,7 @@ export function selectRankedPitches<Candidate extends PitchSelectionCandidate>(
     selectedIds: selected.map((candidate) => candidate.id),
     cutoffVotes,
     tieCandidateIds: tieAtCutoff ? candidatesAtCutoff.map((candidate) => candidate.id) : [],
-    tieSelectedIds: tieAtCutoff ? selectedAtCutoff.map((candidate) => candidate.id) : [],
+    tieSlots: tieAtCutoff ? slotsAtCutoff : 0,
   };
 }
 

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   eventRegistrationIsOpen,
   innolabProjectFormationIsOpen,
+  innolabRosterChangesRequireCoach,
   pitchSubmissionsAreOpen,
   pitchVotingHasClosed,
   pitchVotingIsOpen,
@@ -50,5 +51,16 @@ describe("Innolab phases", () => {
         NOW
       )
     ).toBe(true);
+  });
+
+  test("requires a coach for roster changes after Tuesday 23:59", () => {
+    const monday = new Date(2026, 10, 9, 9, 0, 0);
+    const dated = { ...event, pitchSubmissionsOpen: monday.toISOString() };
+    expect(
+      innolabRosterChangesRequireCoach(dated, new Date(2026, 10, 10, 23, 59, 59).getTime())
+    ).toBe(false);
+    expect(innolabRosterChangesRequireCoach(dated, new Date(2026, 10, 11, 0, 0, 0).getTime())).toBe(
+      true
+    );
   });
 });

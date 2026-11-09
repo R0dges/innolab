@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CalendarClock, CheckCircle2, Gavel, Lock } from "lucide-react";
+import { ArrowRight, CalendarClock, CheckCircle2, Gavel, Lock, Users } from "lucide-react";
 
 import { Badge } from "@juryza/ui/components/ui/badge";
 import { Button } from "@juryza/ui/components/ui/button";
@@ -34,6 +34,7 @@ interface QueueEvent {
   slug: string;
   name: string;
   hue: number;
+  judgingOpen: string | null;
   judgingClose: string | null;
   submissionsClose: string;
   resultsPublished: boolean;
@@ -89,7 +90,8 @@ export default function JudgingPage() {
             </EmptyMedia>
             <EmptyTitle>Aucun projet à évaluer</EmptyTitle>
             <EmptyDescription>
-              Les projets des événements Innovation Lab apparaîtront ici dès leur phase d’évaluation.
+              Les projets des événements Innovation Lab apparaîtront ici dès leur phase
+              d’évaluation.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -98,8 +100,10 @@ export default function JudgingPage() {
           {events.map((e) => {
             const done = Math.min(e.scored, e.assigned);
             const pct = e.assigned ? Math.round((done / e.assigned) * 100) : 0;
+            const opens = new Date(e.judgingOpen ?? e.submissionsClose).getTime();
             const closes = e.judgingClose ? new Date(e.judgingClose).getTime() : null;
             const locked = e.resultsPublished || (closes !== null && closes <= now);
+            const upcoming = !locked && opens > now;
             const complete = e.assigned > 0 && done >= e.assigned;
             return (
               <Card key={e.id} className="flex-col gap-0 overflow-hidden py-0 sm:flex-row">
@@ -111,6 +115,10 @@ export default function JudgingPage() {
                       {locked ? (
                         <Badge variant="secondary">
                           <Lock /> {e.resultsPublished ? "Résultats publiés" : "Évaluations closes"}
+                        </Badge>
+                      ) : upcoming ? (
+                        <Badge variant="outline">
+                          <CalendarClock /> Ouverture {relativeTime(opens, now)}
                         </Badge>
                       ) : complete ? (
                         <Badge>
@@ -131,13 +139,25 @@ export default function JudgingPage() {
                     <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
                       <CalendarClock className="size-3.5" />
                       {closes === null
-                        ? "Aucune date de clôture définie"
+                        ? upcoming
+                          ? `Ouverture le ${formatDateTime(opens)}`
+                          : "Aucune date de clôture définie"
                         : closes > now
-                          ? `Clôture ${relativeTime(closes, now)} · ${formatDateTime(closes)}`
+                          ? upcoming
+                            ? `Ouverture le ${formatDateTime(opens)} · clôture le ${formatDateTime(closes)}`
+                            : `Clôture ${relativeTime(closes, now)} · ${formatDateTime(closes)}`
                           : `Évaluations closes le ${formatDateTime(closes)}`}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      nativeButton={false}
+                      render={<Link href={`/manage/${e.slug}/judges`} />}
+                    >
+                      <Users /> Gérer le jury
+                    </Button>
                     <Button
                       size="sm"
                       nativeButton={false}
@@ -145,7 +165,7 @@ export default function JudgingPage() {
                     >
                       {e.assigned === 0
                         ? "Ouvrir"
-                        : complete || locked
+                        : complete || locked || upcoming
                           ? "Consulter les notes"
                           : done === 0
                             ? "Commencer"

@@ -16,6 +16,7 @@ import {
   vote,
 } from "@/lib/db";
 import { phaseOf } from "@/lib/phase";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { loadManagedEvent } from "@/lib/server/events";
 import { handle } from "@/lib/server/http";
 import { requireUser } from "@/lib/server/identity";
@@ -72,13 +73,19 @@ export const GET = handle<{ event: string }>(async (req, { event: ref }) => {
       .where(and(eq(project.eventId, e.id), eq(project.status, "submitted")))
       .groupBy(sql`1`)
       .orderBy(sql`1`),
-    db
-      .select({ trackId: track.id, name: track.name, n: sql<number>`count(${project.id})::int` })
-      .from(track)
-      .leftJoin(project, and(eq(project.trackId, track.id), eq(project.status, "submitted")))
-      .where(eq(track.eventId, e.id))
-      .groupBy(track.id, track.name, track.position)
-      .orderBy(track.position),
+    EVENT_TRACKS_ENABLED
+      ? db
+          .select({
+            trackId: track.id,
+            name: track.name,
+            n: sql<number>`count(${project.id})::int`,
+          })
+          .from(track)
+          .leftJoin(project, and(eq(project.trackId, track.id), eq(project.status, "submitted")))
+          .where(eq(track.eventId, e.id))
+          .groupBy(track.id, track.name, track.position)
+          .orderBy(track.position)
+      : Promise.resolve([]),
     db
       .select({
         judgeId: userTable.id,

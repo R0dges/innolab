@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Award,
   CalendarDays,
-  DollarSign,
+  Coins,
   ExternalLink,
   FolderKanban,
   Gavel,
@@ -203,10 +203,10 @@ export default function ProfilePage() {
               </div>
               <div className="flex flex-col">
                 <span className="text-muted-foreground flex items-center gap-1 text-xs">
-                  <DollarSign className="size-3.5 text-emerald-500" /> Prizes Won
+                  <Coins className="size-3.5 text-emerald-500" /> DZcoin
                 </span>
                 <span className="text-xl font-bold tracking-tight text-emerald-600 tabular-nums dark:text-emerald-400">
-                  ${(u.prizeUsd ?? 0).toLocaleString()}
+                  {(u.prizeUsd ?? 0).toLocaleString()} DZcoin
                 </span>
               </div>
               <div className="flex flex-col">
@@ -404,7 +404,7 @@ export default function ProfilePage() {
                 <Trophy className="size-4 text-amber-500" /> Platform Leaderboard
               </div>
               <p className="text-muted-foreground text-xs">
-                See where @{u.username} ranks across all hackathons, prizes, and award categories.
+                See where @{u.username} ranks across all Innovation Labs, DZcoin, and distinctions.
               </p>
               <Button
                 size="sm"

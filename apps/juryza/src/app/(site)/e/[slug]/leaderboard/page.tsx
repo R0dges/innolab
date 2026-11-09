@@ -59,6 +59,7 @@ import { ProjectCover } from "@/components/project-card";
 import { api } from "@/lib/api";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { votingIsOpen } from "@/lib/phase";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { useEvent } from "@/lib/queries";
 import type { EventResults } from "@/lib/server/results";
 import type { Json } from "@/lib/types";
@@ -227,9 +228,11 @@ export default function LeaderboardPage() {
             <TabsTrigger value="overall">
               <Trophy /> Overall
             </TabsTrigger>
-            <TabsTrigger value="tracks">
-              <Medal /> By track
-            </TabsTrigger>
+            {EVENT_TRACKS_ENABLED && (
+              <TabsTrigger value="tracks">
+                <Medal /> By track
+              </TabsTrigger>
+            )}
             <TabsTrigger value="community">
               <Vote /> Community choice
             </TabsTrigger>
@@ -241,9 +244,11 @@ export default function LeaderboardPage() {
         <TabsContent value="overall">
           <OverallTable rows={data.projects} href={href} />
         </TabsContent>
-        <TabsContent value="tracks">
-          <ByTrack rows={ranked} href={href} />
-        </TabsContent>
+        {EVENT_TRACKS_ENABLED && (
+          <TabsContent value="tracks">
+            <ByTrack rows={ranked} href={href} />
+          </TabsContent>
+        )}
         <TabsContent value="community">
           <CommunityTable rows={data.projects} href={href} />
         </TabsContent>
@@ -400,7 +405,7 @@ function OverallTable({ rows, href }: { rows: Row[]; href: (id: string) => strin
           <TableRow>
             <TableHead className="w-14 pl-4">Rank</TableHead>
             <TableHead>Project</TableHead>
-            <TableHead className="hidden lg:table-cell">Track</TableHead>
+            {EVENT_TRACKS_ENABLED && <TableHead className="hidden lg:table-cell">Track</TableHead>}
             <TableHead className="text-right">Reviews</TableHead>
             <TableHead className="text-right">Coup de cœur</TableHead>
             <TableHead className="text-right">Normalized</TableHead>
@@ -430,9 +435,11 @@ function OverallTable({ rows, href }: { rows: Row[]; href: (id: string) => strin
                   )}
                 </div>
               </TableCell>
-              <TableCell className="text-muted-foreground hidden lg:table-cell">
-                {p.trackName ?? "—"}
-              </TableCell>
+              {EVENT_TRACKS_ENABLED && (
+                <TableCell className="text-muted-foreground hidden lg:table-cell">
+                  {p.trackName ?? "—"}
+                </TableCell>
+              )}
               <TableCell className="text-right tabular-nums">{p.reviews}</TableCell>
               <TableCell className="text-right tabular-nums">
                 <span className="inline-flex items-center gap-1">

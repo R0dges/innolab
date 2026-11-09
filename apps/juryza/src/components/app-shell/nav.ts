@@ -16,7 +16,6 @@ import {
   ScrollText,
   Settings,
   ShieldCheck,
-  Tags,
   Trophy,
   UserRound,
   Users,
@@ -24,6 +23,7 @@ import {
 
 import type { Viewer } from "@/components/viewer";
 import type { TranslationKey } from "@/lib/i18n";
+import { EVENT_REWARDS_ENABLED } from "@/lib/platform";
 import { hasAtLeast } from "@/lib/roles";
 
 /** Sidebar navigation, derived from the viewer's role and judging panels. */
@@ -95,7 +95,9 @@ export function manageNav(slug: string, t: Translator): NavGroup[] {
       items: [
         { href: base, label: t("nav.overview"), icon: BarChart3, exact: true },
         { href: `${base}/settings`, label: t("nav.detailsDates"), icon: Settings },
-        { href: `${base}/tracks`, label: t("nav.tracksPrizes"), icon: Tags },
+        ...(EVENT_REWARDS_ENABLED
+          ? [{ href: `${base}/tracks`, label: t("nav.tracksPrizes"), icon: Trophy }]
+          : []),
         { href: `${base}/announcements`, label: t("nav.announcements"), icon: Megaphone },
         { href: `${base}/workspace`, label: t("nav.auditResources"), icon: FileSearch },
         { href: `${base}/schedule`, label: t("nav.calendar"), icon: CalendarDays },
@@ -123,6 +125,16 @@ export function manageNav(slug: string, t: Translator): NavGroup[] {
         { href: `${base}/data`, label: t("nav.importExport"), icon: Database },
         { href: `${base}/audit`, label: t("nav.auditLog"), icon: ScrollText },
       ],
+    },
+  ];
+}
+
+/** Restricted event navigation for an appointed judge who is not an event manager. */
+export function judgePanelNav(slug: string, t: Translator): NavGroup[] {
+  return [
+    {
+      label: t("nav.projectEvaluation"),
+      items: [{ href: `/manage/${slug}/judges`, label: t("nav.coaches"), icon: Gavel }],
     },
   ];
 }

@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   db,
   event,
+  eventAssistant,
   eventDocument,
   eventJudge,
   eventResource,
@@ -21,11 +22,14 @@ import {
 } from "@/lib/db";
 import { innolabProjectFormationIsOpen, pitchVotingHasClosed } from "@/lib/innolab";
 import { phaseOf } from "@/lib/phase";
+import { EVENT_REWARDS_ENABLED, EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { visibleScheduleAudiences } from "@/lib/schedule";
 import { announcementsForEvent } from "@/lib/server/announcements";
 import { loadEvent, viewerForEvent } from "@/lib/server/events";
 import { handle } from "@/lib/server/http";
 import { resolveIdentity } from "@/lib/server/identity";
+import { computeResults } from "@/lib/server/results";
+import { teamMembers } from "@/lib/server/teams";
 
 type P = { event: string };
 
@@ -54,11 +58,14 @@ export const GET = handle<P>(async (req, { event: ref }) => {
     [counts],
     ideas,
     myJoinRequests,
+    assistantRows,
     auditDocuments,
-    resources,
     schedule,
+    resources,
   ] = await Promise.all([
-    db.select().from(track).where(eq(track.eventId, e.id)).orderBy(asc(track.position)),
+    EVENT_TRACKS_ENABLED
+      ? db.select().from(track).where(eq(track.eventId, e.id)).orderBy(asc(track.position))
+      : Promise.resolve([]),
     db
       .select()
       .from(prize)
@@ -129,6 +136,13 @@ export const GET = handle<P>(async (req, { event: ref }) => {
       : Promise.resolve([]),
     canSeeOperationalData
       ? db
+          .select({ url: eventAssistant.url })
+          .from(eventAssistant)
+          .where(eq(eventAssistant.eventId, e.id))
+          .limit(1)
+      : Promise.resolve([]),
+    canSeeOperationalData
+      ? db
           .select()
           .from(eventDocument)
           .where(
@@ -166,13 +180,39 @@ export const GET = handle<P>(async (req, { event: ref }) => {
   ]);
 
   const pendingProjectIds = new Set(myJoinRequests.map((request) => request.projectId));
+  const winner = e.resultsPublished
+    ? (await computeResults(e)).projects.find((entry) => entry.rank === 1 && entry.teamId)
+    : null;
+  const winnerMembers = winner?.teamId ? await teamMembers(winner.teamId) : [];
+  const wallOfFame = winner
+    ? {
+        project: {
+          id: winner.id,
+          title: winner.title,
+          tagline: winner.tagline,
+          thumbnailUrl: winner.thumbnailUrl,
+          teamName: winner.teamName,
+        },
+        members: winnerMembers.map((member) => ({
+          id: member.id,
+          name: member.name,
+          username: member.username,
+          image: member.image,
+          headline: member.headline,
+        })),
+      }
+    : null;
 
   return {
     event: e,
     viewer,
     phase: phaseOf(e),
     tracks,
-    prizes,
+    prizes: EVENT_REWARDS_ENABLED
+      ? EVENT_TRACKS_ENABLED
+        ? prizes
+        : prizes.filter((entry) => entry.kind !== "track")
+      : [],
     criteria,
     judges,
     announcements,
@@ -209,11 +249,11 @@ export const GET = handle<P>(async (req, { event: ref }) => {
                   ? "already-on-team"
                   : idea.projectId && pendingProjectIds.has(idea.projectId)
                     ? "requested"
-                  : !projectRegistrationIsOpen || !idea.lookingForMembers
-                    ? "closed"
-                    : idea.memberCount >= e.maxTeamSize
-                      ? "full"
-                      : "available";
+                    : !projectRegistrationIsOpen || !idea.lookingForMembers
+                      ? "closed"
+                      : idea.memberCount >= e.maxTeamSize
+                        ? "full"
+                        : "available";
         return {
           pitchId: idea.id,
           projectId: canSeeProject ? idea.projectId : null,
@@ -246,7 +286,9 @@ export const GET = handle<P>(async (req, { event: ref }) => {
         };
       }),
     audit: auditDocuments[0] ?? null,
+    assistant: assistantRows[0] ?? null,
     resources,
     schedule,
+    wallOfFame,
   };
 });

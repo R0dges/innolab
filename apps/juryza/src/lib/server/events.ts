@@ -9,8 +9,7 @@ import type { Identity } from "@/lib/server/identity";
 /**
  * Event lookup and the per-event permission rules.
  *
- *  - **Manage** an event: its coach creator, or an admin. The coach role may
- *    create events, but does not grant power over another coach's events.
+ *  - **Manage** an event: every attached coach, or a global admin.
  *  - **Judge** an event: a member of its judging panel (`event_judge`).
  *  - **See** a draft event: managers only; published events are public.
  */
@@ -30,7 +29,7 @@ export function canManage(me: Identity | null, e: Pick<Event, "createdBy">): boo
   return me.role === "admin" || (hasAtLeast(me.role, "judge") && e.createdBy === me.userId);
 }
 
-/** Innolab jury membership is appointed by platform admins, not event participants or owners. */
+/** Removing Innolab jury members remains an admin-only operation. */
 export function canManageJudgePanel(
   me: Identity | null,
   e: Pick<Event, "createdBy" | "workflow">
@@ -38,17 +37,22 @@ export function canManageJudgePanel(
   return canManage(me, e) && (e.workflow !== "innolab" || me?.role === "admin");
 }
 
-/** Load an event the caller may see; drafts 404 for non-managers (no existence leak). */
+/** Load an event the caller may see; drafts are limited to managers and appointed judges. */
 export async function loadEvent(ref: string, me: Identity | null): Promise<Event> {
   const e = await findEvent(ref);
-  if (!e || (e.visibility !== "published" && !canManage(me, e))) throw notFound("Event not found");
+  if (!e) throw notFound("Event not found");
+  if (e.visibility !== "published" && !canManage(me, e)) {
+    if (!me || !(await isPanelJudge(e.id, me.userId))) throw notFound("Event not found");
+  }
   return e;
 }
 
 export async function loadManagedEvent(ref: string, me: Identity): Promise<Event> {
   const e = await findEvent(ref);
   if (!e) throw notFound("Event not found");
-  if (!canManage(me, e)) throw forbidden("Only this event's coach creator can do that");
+  if (!canManage(me, e) && !(await isPanelJudge(e.id, me.userId))) {
+    throw forbidden("Only coaches attached to this event can do that");
+  }
   return e;
 }
 
@@ -65,7 +69,7 @@ export async function loadCoachedEvent(ref: string, me: Identity): Promise<Event
 export async function loadJudgeManagedEvent(ref: string, me: Identity): Promise<Event> {
   const e = await loadManagedEvent(ref, me);
   if (e.workflow === "innolab" && me.role !== "admin") {
-    throw forbidden("Only platform admins can appoint judges for an Innolab event");
+    throw forbidden("Only platform admins can remove judges from an Innolab event");
   }
   return e;
 }
@@ -78,6 +82,9 @@ export async function isPanelJudge(eventId: string, userId: string): Promise<boo
     .limit(1);
   return Boolean(row);
 }
+
+/** All event-level business permissions are shared by attached coaches. */
+export const isEventCoach = isPanelJudge;
 
 /** The caller's team in an event, if any. A user is on at most one team per event. */
 export async function teamOf(eventId: string, userId: string) {
@@ -106,7 +113,7 @@ export async function viewerForEvent(e: Event, me: Identity | null) {
     registered: Boolean(reg),
     team: teamRow,
     isJudge: panelJudge,
-    canManage: canManage(me, e),
+    canManage: canManage(me, e) || panelJudge,
   };
 }
 

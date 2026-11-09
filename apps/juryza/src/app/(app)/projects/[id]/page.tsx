@@ -81,6 +81,7 @@ import { coverStyle } from "@/components/event-bits";
 import { AvatarStack } from "@/components/user-avatar";
 import { api } from "@/lib/api";
 import { formatDateTime, hueOf, relativeTime } from "@/lib/format";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { useEvent } from "@/lib/queries";
 import { isEmptyDoc } from "@/lib/rich-text";
 import type { Json, Project, RichDoc, Track } from "@/lib/types";
@@ -369,7 +370,9 @@ function ProjectDocument({ data }: { data: ProjectData }) {
   const checklist = [
     { label: "A title", ok: fields.title.trim().length > 0, required: true },
     { label: "A one-line tagline", ok: fields.tagline.trim().length > 0 },
-    ...(tracks.length ? [{ label: "A track", ok: fields.trackId !== null }] : []),
+    ...(EVENT_TRACKS_ENABLED && tracks.length
+      ? [{ label: "A track", ok: fields.trackId !== null }]
+      : []),
     { label: "A write-up for judges", ok: !isEmptyDoc(fields.content) },
     { label: "A repository link", ok: isHttpUrl(fields.repoUrl.trim()) },
     {
@@ -628,40 +631,42 @@ function ProjectDocument({ data }: { data: ProjectData }) {
               <span className="text-muted-foreground">No team</span>
             )}
           </Prop>
-          <Prop icon={Tags} label="Track" interactive={false}>
-            {canEdit && tracks.length > 0 ? (
-              <Select
-                items={[
-                  { value: null, label: "No track" },
-                  ...tracks.map((t) => ({ value: t.id, label: t.name })),
-                ]}
-                value={fields.trackId}
-                onValueChange={(v) => set("trackId", v)}
-              >
-                <SelectTrigger
-                  aria-label="Track"
-                  className="hover:bg-muted/60 h-8 w-full justify-between border-0 bg-transparent! px-2 shadow-none"
+          {EVENT_TRACKS_ENABLED && (
+            <Prop icon={Tags} label="Track" interactive={false}>
+              {canEdit && tracks.length > 0 ? (
+                <Select
+                  items={[
+                    { value: null, label: "No track" },
+                    ...tracks.map((t) => ({ value: t.id, label: t.name })),
+                  ]}
+                  value={fields.trackId}
+                  onValueChange={(v) => set("trackId", v)}
                 >
-                  <SelectValue
-                    placeholder={<span className="text-muted-foreground">Choose a track</span>}
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={null}>No track</SelectItem>
-                  {tracks.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <span className={cn(!fields.trackId && "text-muted-foreground")}>
-                {tracks.find((t) => t.id === fields.trackId)?.name ??
-                  (tracks.length ? "No track" : "This event has no tracks")}
-              </span>
-            )}
-          </Prop>
+                  <SelectTrigger
+                    aria-label="Track"
+                    className="hover:bg-muted/60 h-8 w-full justify-between border-0 bg-transparent! px-2 shadow-none"
+                  >
+                    <SelectValue
+                      placeholder={<span className="text-muted-foreground">Choose a track</span>}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={null}>No track</SelectItem>
+                    {tracks.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <span className={cn(!fields.trackId && "text-muted-foreground")}>
+                  {tracks.find((t) => t.id === fields.trackId)?.name ??
+                    (tracks.length ? "No track" : "This event has no tracks")}
+                </span>
+              )}
+            </Prop>
+          )}
           <Prop icon={Code2} label="Tech" interactive={canEdit}>
             {canEdit ? (
               <TagInput

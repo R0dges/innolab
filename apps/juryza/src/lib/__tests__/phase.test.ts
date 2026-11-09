@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   type EventDates,
   hasVoting,
+  judgingIsOpen,
   milestones,
   phaseOf,
   submissionsAreOpen,
@@ -21,6 +22,25 @@ const event: EventDates = {
   votingClose: at(72),
   resultsPublished: false,
 };
+
+describe("judgingIsOpen", () => {
+  test("opens at judgingOpen and closes at judgingClose", () => {
+    const e = { ...event, judgingOpen: at(60) };
+    expect(judgingIsOpen(e, T0 + 60 * HOUR - 1)).toBe(false);
+    expect(judgingIsOpen(e, T0 + 60 * HOUR)).toBe(true);
+    expect(judgingIsOpen(e, T0 + 96 * HOUR - 1)).toBe(true);
+    expect(judgingIsOpen(e, T0 + 96 * HOUR)).toBe(false);
+  });
+
+  test("falls back to the submission deadline for legacy events", () => {
+    expect(judgingIsOpen(event, T0 + 48 * HOUR - 1)).toBe(false);
+    expect(judgingIsOpen(event, T0 + 48 * HOUR)).toBe(true);
+  });
+
+  test("stays closed once results are published", () => {
+    expect(judgingIsOpen({ ...event, resultsPublished: true }, T0 + 60 * HOUR)).toBe(false);
+  });
+});
 
 describe("submissionsAreOpen", () => {
   test("opens at submissionsOpen (inclusive) and closes at the deadline (exclusive)", () => {
@@ -92,7 +112,7 @@ describe("phaseOf", () => {
 
 describe("milestones", () => {
   test("lists only set dates, in time order", () => {
-    const shuffled = { ...event, votingOpen: at(10), judgingClose: null };
+    const shuffled = { ...event, votingOpen: at(10), judgingOpen: null, judgingClose: null };
     expect(milestones(shuffled).map((m) => m.key)).toEqual([
       "open",
       "voteOpen",

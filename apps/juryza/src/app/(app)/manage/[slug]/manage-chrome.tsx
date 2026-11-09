@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import { ExternalLink } from "lucide-react";
 
@@ -18,10 +19,12 @@ import { useEvent } from "@/lib/queries";
  * `useEvent(slug)` (cached) and render their own section below.
  */
 export function ManageChrome({ slug, children }: { slug: string; children: React.ReactNode }) {
+  const pathname = usePathname();
   const { data, isLoading, error } = useEvent(slug);
   const { t } = useI18n();
+  const canOpenJudgePanel = pathname === `/manage/${slug}/judges` && data?.viewer?.isJudge === true;
 
-  if (error || (data && !data.viewer?.canManage)) {
+  if (error || (data && !data.viewer?.canManage && !canOpenJudgePanel)) {
     return (
       <Empty className="border">
         <EmptyHeader>

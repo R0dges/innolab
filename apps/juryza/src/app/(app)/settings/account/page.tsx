@@ -51,7 +51,7 @@ import { formatDate } from "@/lib/format";
 const ROLE_HINT: Record<string, string> = {
   participant: "Join events, form teams and submit projects.",
   judge: "Everything a participant can do, plus scoring projects on panels you're invited to.",
-  organizer: "Create and run events: tracks, rubric, judges, results.",
+  organizer: "Create and run events: rubric, judges, rewards, results.",
   admin: "Full access to the instance, including user roles.",
 };
 

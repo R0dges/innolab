@@ -41,6 +41,10 @@ export const resourcePatch = resourceInput
   .partial()
   .refine((value) => Object.keys(value).length > 0, "At least one field is required");
 
+export const eventAssistantInput = z.object({
+  url: httpUrl.nullable(),
+});
+
 export function canAccessEventWorkspace(viewer: EventViewer): boolean {
   return Boolean(viewer?.registered || viewer?.isJudge || viewer?.canManage);
 }

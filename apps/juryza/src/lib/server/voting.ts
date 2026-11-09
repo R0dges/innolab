@@ -112,7 +112,7 @@ export async function electorateAllows(
  * "no restriction" and the caller need not check membership.
  */
 export async function votableProjectIds(
-  e: Pick<Event, "id" | "votingShortlistSize">
+  e: Pick<Event, "id" | "workflow" | "votingShortlistSize">
 ): Promise<Set<string> | null> {
   if (!e.votingShortlistSize || e.votingShortlistSize <= 0) return null;
   const { projects } = await computeResults(e);

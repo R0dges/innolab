@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 
 import { db, project, track } from "@/lib/db";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { handle, notFound } from "@/lib/server/http";
 import { nearest } from "@/lib/similarity";
 
@@ -29,7 +30,11 @@ export const GET = handle<{ id: string }>(async (_req, { id: projectId }) => {
   return {
     similar: nearest(all, projectId, 4).map((n) => {
       const { description: _d, ...rest } = byId.get(n.id) as (typeof all)[number];
-      return { ...rest, score: n.score };
+      return {
+        ...rest,
+        trackName: EVENT_TRACKS_ENABLED ? rest.trackName : null,
+        score: n.score,
+      };
     }),
   };
 });

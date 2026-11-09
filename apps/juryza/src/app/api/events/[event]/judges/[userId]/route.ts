@@ -6,6 +6,7 @@ import { audit } from "@/lib/server/audit";
 import { loadJudgeManagedEvent } from "@/lib/server/events";
 import { handle, notFound, readBody } from "@/lib/server/http";
 import { requireUser } from "@/lib/server/identity";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 
 type P = { event: string; userId: string };
 
@@ -21,6 +22,7 @@ type P = { event: string; userId: string };
 export const PATCH = handle<P>(async (req, { event: ref, userId }) => {
   const me = await requireUser(req);
   const e = await loadJudgeManagedEvent(ref, me);
+  if (!EVENT_TRACKS_ENABLED) throw notFound("Les restrictions par axe sont désactivées");
   const { trackIds } = await readBody(req, z.object({ trackIds: z.array(z.string()).max(30) }));
   const res = await db
     .update(eventJudge)

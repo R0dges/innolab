@@ -194,7 +194,7 @@ export default function ManageEventsPage() {
             </EmptyMedia>
             <EmptyTitle>Aucun événement</EmptyTitle>
             <EmptyDescription>
-              Préparez votre premier Innovation Lab : informations, calendrier, axes et règles du
+              Préparez votre premier Innovation Lab : informations, calendrier et règles du
               parcours. Il restera en brouillon jusqu’à sa publication.
             </EmptyDescription>
           </EmptyHeader>

@@ -140,66 +140,94 @@ export const apiToken = pgTable("api_token", {
 /* Events                                                             */
 /* ------------------------------------------------------------------ */
 
-export const event = pgTable("event", {
-  id: text("id").primaryKey(),
-  slug: text("slug").notNull().unique(),
-  name: text("name").notNull(),
-  tagline: text("tagline"),
-  // Plain-text summary (search, cards, embeds) and the rich overview/rules.
-  description: text("description"),
-  content: jsonb("content").$type<RichDoc>(),
-  rules: jsonb("rules").$type<RichDoc>(),
-  mode: text("mode").default("in-person").notNull(), // online | in-person | hybrid
-  location: text("location").default("Genève"),
-  // Accent hue (0–360) for the event's cover gradient.
-  hue: integer("hue").default(250).notNull(),
-  // draft events are visible to organizers only; published are public.
-  visibility: text("visibility").default("published").notNull(), // draft | published
-  // Standard events keep Juryza's project-first flow. Innolab adds an idea
-  // preselection before teams and projects are formed.
-  workflow: text("workflow").default("innolab").notNull(), // standard | innolab
-  pitchSubmissionsOpen: timestamp("pitch_submissions_open"),
-  pitchSubmissionsClose: timestamp("pitch_submissions_close"),
-  pitchVotingOpen: timestamp("pitch_voting_open"),
-  pitchVotingClose: timestamp("pitch_voting_close"),
-  // A coach reveals every submitted pitch at the start of the presentation session.
-  pitchPresentationOpenedAt: timestamp("pitch_presentation_opened_at"),
-  // Pitch selection is finalized once: the quota and deterministic tie-break seed
-  // make the resulting projects reproducible and auditable.
-  pitchSelectionCount: integer("pitch_selection_count"),
-  pitchSelectionSeed: text("pitch_selection_seed"),
-  pitchSelectionFinalizedAt: timestamp("pitch_selection_finalized_at"),
-  // Lifecycle: submissions → judging → community voting → results.
-  submissionsOpen: timestamp("submissions_open"),
-  submissionsClose: timestamp("submissions_close").notNull(),
-  judgingClose: timestamp("judging_close"),
-  votingOpen: timestamp("voting_open"),
-  votingClose: timestamp("voting_close"),
-  resultsPublished: boolean("results_published").default(false).notNull(),
-  isFixture: boolean("is_fixture").default(false).notNull(),
-  // Team + judging configuration.
-  maxTeamSize: integer("max_team_size").default(6).notNull(),
-  reviewsPerProject: integer("reviews_per_project").default(3).notNull(),
-  // Community voting configuration (T3).
-  votingAccess: text("voting_access").default("authenticated").notNull(), // open | email | authenticated
-  votingEmailDomains: jsonb("voting_email_domains").$type<string[]>().default([]).notNull(),
-  voteBudget: integer("vote_budget").default(16).notNull(),
-  // Anti-abuse levers (all default to the pre-existing behaviour):
-  //  - votingMode `quadratic` (a counted public vote) or `writeup` (public
-  //    input with no live tally; the judging panel decides).
-  //  - votingShortlistSize `0` = every submitted project is votable; `N` = only
-  //    the top N by judged rank, so a poll runs on finalists alone.
-  //  - votingElectorateLockAt: only accounts created on or before this instant
-  //    may vote — automates the "member before kickoff" rule.
-  votingMode: text("voting_mode").default("quadratic").notNull(), // quadratic | writeup
-  votingShortlistSize: integer("voting_shortlist_size").default(0).notNull(),
-  votingElectorateLockAt: timestamp("voting_electorate_lock_at"),
-  createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
-  createdAt: createdAt(),
-  updatedAt: timestamp("updated_at")
-    .$defaultFn(() => new Date())
-    .notNull(),
-});
+export const event = pgTable(
+  "event",
+  {
+    id: text("id").primaryKey(),
+    slug: text("slug").notNull().unique(),
+    name: text("name").notNull(),
+    tagline: text("tagline"),
+    // Plain-text summary (search, cards, embeds) and the rich overview/rules.
+    description: text("description"),
+    content: jsonb("content").$type<RichDoc>(),
+    rules: jsonb("rules").$type<RichDoc>(),
+    mode: text("mode").default("in-person").notNull(), // online | in-person | hybrid
+    location: text("location").default("Genève"),
+    // Accent hue (0–360) for the event's cover gradient.
+    hue: integer("hue").default(250).notNull(),
+    // draft events are visible to organizers only; published are public.
+    visibility: text("visibility").default("published").notNull(), // draft | published
+    // Standard events keep Juryza's project-first flow. Innolab adds an idea
+    // preselection before teams and projects are formed.
+    workflow: text("workflow").default("innolab").notNull(), // standard | innolab
+    pitchSubmissionsOpen: timestamp("pitch_submissions_open"),
+    pitchSubmissionsClose: timestamp("pitch_submissions_close"),
+    pitchVotingOpen: timestamp("pitch_voting_open"),
+    pitchVotingClose: timestamp("pitch_voting_close"),
+    // A coach reveals every submitted pitch at the start of the presentation session.
+    pitchPresentationOpenedAt: timestamp("pitch_presentation_opened_at"),
+    // Pitch selection is finalized once. When participant votes are tied at the
+    // cutoff, every coach attached to the event can take part in a quick runoff.
+    pitchSelectionCount: integer("pitch_selection_count"),
+    // Legacy selections may still carry the former random tie-break seed.
+    pitchSelectionSeed: text("pitch_selection_seed"),
+    pitchTieBreakRound: integer("pitch_tie_break_round"),
+    pitchTieBreakCandidateIds: jsonb("pitch_tie_break_candidate_ids")
+      .$type<string[]>()
+      .default([])
+      .notNull(),
+    pitchTieBreakSelectedIds: jsonb("pitch_tie_break_selected_ids")
+      .$type<string[]>()
+      .default([])
+      .notNull(),
+    pitchTieBreakSlots: integer("pitch_tie_break_slots"),
+    pitchSelectionFinalizedAt: timestamp("pitch_selection_finalized_at"),
+    rubricRevision: integer("rubric_revision").default(0).notNull(),
+    // Lifecycle: submissions → judging → community voting → results.
+    submissionsOpen: timestamp("submissions_open"),
+    submissionsClose: timestamp("submissions_close").notNull(),
+    // Coaches can prepare their queue earlier, but may only save scores once
+    // the final project presentations begin.
+    judgingOpen: timestamp("judging_open"),
+    judgingClose: timestamp("judging_close"),
+    votingOpen: timestamp("voting_open"),
+    votingClose: timestamp("voting_close"),
+    resultsPublished: boolean("results_published").default(false).notNull(),
+    activatedAt: timestamp("activated_at"),
+    cancelledAt: timestamp("cancelled_at"),
+    archivedAt: timestamp("archived_at"),
+    isFixture: boolean("is_fixture").default(false).notNull(),
+    // Team + judging configuration.
+    maxTeamSize: integer("max_team_size").default(6).notNull(),
+    reviewsPerProject: integer("reviews_per_project").default(3).notNull(),
+    // Community voting configuration (T3).
+    votingAccess: text("voting_access").default("authenticated").notNull(), // open | email | authenticated
+    votingEmailDomains: jsonb("voting_email_domains").$type<string[]>().default([]).notNull(),
+    voteBudget: integer("vote_budget").default(16).notNull(),
+    // Anti-abuse levers (all default to the pre-existing behaviour):
+    //  - votingMode `quadratic` (a counted public vote) or `writeup` (public
+    //    input with no live tally; the judging panel decides).
+    //  - votingShortlistSize `0` = every submitted project is votable; `N` = only
+    //    the top N by judged rank, so a poll runs on finalists alone.
+    //  - votingElectorateLockAt: only accounts created on or before this instant
+    //    may vote — automates the "member before kickoff" rule.
+    votingMode: text("voting_mode").default("quadratic").notNull(), // quadratic | writeup
+    votingShortlistSize: integer("voting_shortlist_size").default(0).notNull(),
+    votingElectorateLockAt: timestamp("voting_electorate_lock_at"),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex("event_one_active_per_location_idx")
+      .on(t.location)
+      .where(
+        sql`${t.visibility} = 'published' and ${t.activatedAt} is not null and ${t.cancelledAt} is null and ${t.archivedAt} is null`
+      ),
+  ]
+);
 
 export const track = pgTable("track", {
   id: text("id").primaryKey(),
@@ -325,6 +353,19 @@ export const eventResource = pgTable(
   (t) => [index("event_resource_event_kind_idx").on(t.eventId, t.kind, t.position)]
 );
 
+/** One private assistant link for an event edition, visible to its workspace members. */
+export const eventAssistant = pgTable("event_assistant", {
+  eventId: text("event_id")
+    .primaryKey()
+    .references(() => event.id, { onDelete: "cascade" }),
+  url: text("url").notNull(),
+  updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+  createdAt: createdAt(),
+  updatedAt: timestamp("updated_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
+});
+
 /** Calendar activity for one edition. Cancelled rows remain for ICS clients and history. */
 export const scheduleItem = pgTable(
   "schedule_item",
@@ -417,6 +458,28 @@ export const pitchVote = pgTable(
     createdAt: createdAt(),
   },
   (t) => [unique().on(t.eventId, t.voterId), unique().on(t.pitchId, t.voterId)]
+);
+
+export const pitchTieBreakVote = pgTable(
+  "pitch_tie_break_vote",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    round: integer("round").notNull(),
+    pitchId: text("pitch_id")
+      .notNull()
+      .references(() => pitch.id, { onDelete: "cascade" }),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("pitch_tie_break_vote_choice_unique").on(t.eventId, t.round, t.pitchId, t.coachId),
+    index("pitch_tie_break_vote_round_idx").on(t.eventId, t.round),
+  ]
 );
 
 /* ------------------------------------------------------------------ */
@@ -611,6 +674,81 @@ export const score = pgTable(
   ]
 );
 
+/**
+ * One shared Innovation Lab deliberation per project. Every coach attached to
+ * the event edits the same criterion marks and consensus comment. `revision`
+ * supports optimistic concurrency so a late save cannot silently overwrite a
+ * colleague's change.
+ */
+export const collectiveScore = pgTable(
+  "collective_score",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    criteria: jsonb("criteria").$type<Record<string, number>>().notNull(),
+    comment: text("comment"),
+    revision: integer("revision").default(1).notNull(),
+    updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => [
+    unique("collective_score_event_project_unique").on(t.eventId, t.projectId),
+    index("collective_score_event_idx").on(t.eventId),
+  ]
+);
+
+/** Each coach may award one personal coup de cœur per event. */
+export const coachFavorite = pgTable(
+  "coach_favorite",
+  {
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.eventId, t.coachId] }),
+    index("coach_favorite_project_idx").on(t.projectId),
+  ]
+);
+
+/** Immutable, versioned snapshot created for every official publication. */
+export const resultPublication = pgTable(
+  "result_publication",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    publishedBy: text("published_by").references(() => user.id, { onDelete: "set null" }),
+    publishedAt: createdAt(),
+    isCurrent: boolean("is_current").default(true).notNull(),
+  },
+  (t) => [
+    unique("result_publication_event_version_unique").on(t.eventId, t.version),
+    index("result_publication_current_idx").on(t.eventId, t.isCurrent),
+  ]
+);
+
 /** Pairwise comparison: a judge picked `winnerId` over `loserId` (Bradley–Terry). */
 export const pairwiseVote = pgTable("pairwise_vote", {
   id: text("id").primaryKey(),
@@ -718,6 +856,16 @@ export const auditLog = pgTable(
   (t) => [index("audit_event_idx").on(t.eventId, t.createdAt)]
 );
 
+/** Platform-wide product policies controlled by global administrators. */
+export const platformSetting = pgTable("platform_setting", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<unknown>().notNull(),
+  updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at")
+    .$defaultFn(() => new Date())
+    .notNull(),
+});
+
 /** Webhook subscriptions. Deliveries are HMAC-signed with the subscription's secret. */
 export const webhook = pgTable("webhook", {
   id: text("id").primaryKey(),
@@ -770,7 +918,7 @@ export const certificate = pgTable("certificate", {
 /* Relations                                                          */
 /* ------------------------------------------------------------------ */
 
-export const eventRelations = relations(event, ({ many }) => ({
+export const eventRelations = relations(event, ({ many, one }) => ({
   tracks: many(track),
   prizes: many(prize),
   criteria: many(rubricCriterion),
@@ -779,8 +927,12 @@ export const eventRelations = relations(event, ({ many }) => ({
   pitches: many(pitch),
   documents: many(eventDocument),
   resources: many(eventResource),
+  assistant: one(eventAssistant),
   scheduleItems: many(scheduleItem),
   calendarSubscriptions: many(calendarSubscription),
+  collectiveScores: many(collectiveScore),
+  coachFavorites: many(coachFavorite),
+  resultPublications: many(resultPublication),
 }));
 
 export const eventDocumentRelations = relations(eventDocument, ({ one }) => ({
@@ -791,6 +943,11 @@ export const eventDocumentRelations = relations(eventDocument, ({ one }) => ({
 export const eventResourceRelations = relations(eventResource, ({ one }) => ({
   event: one(event, { fields: [eventResource.eventId], references: [event.id] }),
   creator: one(user, { fields: [eventResource.createdBy], references: [user.id] }),
+}));
+
+export const eventAssistantRelations = relations(eventAssistant, ({ one }) => ({
+  event: one(event, { fields: [eventAssistant.eventId], references: [event.id] }),
+  editor: one(user, { fields: [eventAssistant.updatedBy], references: [user.id] }),
 }));
 
 export const scheduleItemRelations = relations(scheduleItem, ({ one }) => ({
@@ -807,6 +964,7 @@ export const pitchRelations = relations(pitch, ({ one, many }) => ({
   event: one(event, { fields: [pitch.eventId], references: [event.id] }),
   author: one(user, { fields: [pitch.authorId], references: [user.id] }),
   votes: many(pitchVote),
+  tieBreakVotes: many(pitchTieBreakVote),
   project: one(project),
 }));
 
@@ -814,6 +972,12 @@ export const pitchVoteRelations = relations(pitchVote, ({ one }) => ({
   event: one(event, { fields: [pitchVote.eventId], references: [event.id] }),
   pitch: one(pitch, { fields: [pitchVote.pitchId], references: [pitch.id] }),
   voter: one(user, { fields: [pitchVote.voterId], references: [user.id] }),
+}));
+
+export const pitchTieBreakVoteRelations = relations(pitchTieBreakVote, ({ one }) => ({
+  event: one(event, { fields: [pitchTieBreakVote.eventId], references: [event.id] }),
+  pitch: one(pitch, { fields: [pitchTieBreakVote.pitchId], references: [pitch.id] }),
+  coach: one(user, { fields: [pitchTieBreakVote.coachId], references: [user.id] }),
 }));
 
 export const trackRelations = relations(track, ({ one, many }) => ({
@@ -850,6 +1014,8 @@ export const projectRelations = relations(project, ({ one, many }) => ({
   votes: many(vote),
   comments: many(comment),
   joinRequests: many(projectJoinRequest),
+  collectiveScore: one(collectiveScore),
+  coachFavorites: many(coachFavorite),
 }));
 
 export const projectJoinRequestRelations = relations(projectJoinRequest, ({ one }) => ({
@@ -879,6 +1045,23 @@ export const scoreRelations = relations(score, ({ one }) => ({
   project: one(project, { fields: [score.projectId], references: [project.id] }),
 }));
 
+export const collectiveScoreRelations = relations(collectiveScore, ({ one }) => ({
+  event: one(event, { fields: [collectiveScore.eventId], references: [event.id] }),
+  project: one(project, { fields: [collectiveScore.projectId], references: [project.id] }),
+  editor: one(user, { fields: [collectiveScore.updatedBy], references: [user.id] }),
+}));
+
+export const coachFavoriteRelations = relations(coachFavorite, ({ one }) => ({
+  event: one(event, { fields: [coachFavorite.eventId], references: [event.id] }),
+  coach: one(user, { fields: [coachFavorite.coachId], references: [user.id] }),
+  project: one(project, { fields: [coachFavorite.projectId], references: [project.id] }),
+}));
+
+export const resultPublicationRelations = relations(resultPublication, ({ one }) => ({
+  event: one(event, { fields: [resultPublication.eventId], references: [event.id] }),
+  publisher: one(user, { fields: [resultPublication.publishedBy], references: [user.id] }),
+}));
+
 export const commentRelations = relations(comment, ({ one }) => ({
   project: one(project, { fields: [comment.projectId], references: [project.id] }),
   author: one(user, { fields: [comment.authorId], references: [user.id] }),
@@ -897,11 +1080,16 @@ export type Pitch = typeof pitch.$inferSelect;
 export type PitchVote = typeof pitchVote.$inferSelect;
 export type Assignment = typeof assignment.$inferSelect;
 export type Score = typeof score.$inferSelect;
+export type CollectiveScore = typeof collectiveScore.$inferSelect;
+export type CoachFavorite = typeof coachFavorite.$inferSelect;
+export type ResultPublication = typeof resultPublication.$inferSelect;
+export type PlatformSetting = typeof platformSetting.$inferSelect;
 export type Vote = typeof vote.$inferSelect;
 export type Comment = typeof comment.$inferSelect;
 export type Announcement = typeof announcement.$inferSelect;
 export type EventDocument = typeof eventDocument.$inferSelect;
 export type EventResource = typeof eventResource.$inferSelect;
+export type EventAssistant = typeof eventAssistant.$inferSelect;
 export type ScheduleItem = typeof scheduleItem.$inferSelect;
 export type CalendarSubscription = typeof calendarSubscription.$inferSelect;
 export type ApiToken = typeof apiToken.$inferSelect;

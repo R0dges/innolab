@@ -14,6 +14,7 @@ import {
   track,
   user as userTable,
 } from "@/lib/db";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 
 /** Read models about a person: their dashboard and their public profile. */
 
@@ -70,6 +71,8 @@ export async function overviewFor(userId: string) {
         slug: event.slug,
         name: event.name,
         hue: event.hue,
+        submissionsClose: event.submissionsClose,
+        judgingOpen: event.judgingOpen,
         judgingClose: event.judgingClose,
         resultsPublished: event.resultsPublished,
         assigned: sql<number>`(select count(*)::int from ${assignment} where ${assignment.eventId} = ${event.id} and ${assignment.judgeId} = ${userId})`,
@@ -110,7 +113,15 @@ export async function overviewFor(userId: string) {
       .where(eq(certificate.subjectId, userId))
       .orderBy(desc(certificate.issuedAt)),
   ]);
-  return { participating, projects, judging, organizing, certificates };
+  return {
+    participating,
+    projects: EVENT_TRACKS_ENABLED
+      ? projects
+      : projects.map((entry) => ({ ...entry, trackName: null })),
+    judging,
+    organizing,
+    certificates,
+  };
 }
 
 export async function publicProfile(username: string) {

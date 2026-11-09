@@ -14,6 +14,7 @@ import { requireRole } from "@/lib/server/identity";
 const body = z.object({
   role: z.enum(["participant", "judge", "organizer", "admin"]).optional(),
   banned: z.boolean().optional(),
+  location: z.string().trim().min(1).max(120).nullable().optional(),
 });
 
 export const PATCH = handle<{ id: string }>(async (req, { id: userId }) => {
@@ -21,7 +22,7 @@ export const PATCH = handle<{ id: string }>(async (req, { id: userId }) => {
   const b = await readBody(req, body);
   if (userId === me.userId) throw badRequest("You cannot change your own role or suspend yourself");
   const [u] = await db
-    .select({ id: userTable.id, role: userTable.role })
+    .select({ id: userTable.id, role: userTable.role, location: userTable.location })
     .from(userTable)
     .where(eq(userTable.id, userId))
     .limit(1);
@@ -32,6 +33,7 @@ export const PATCH = handle<{ id: string }>(async (req, { id: userId }) => {
     .set({
       ...(b.role && { role: b.role }),
       ...(b.banned !== undefined && { banned: b.banned }),
+      ...(b.location !== undefined && { location: b.location }),
       updatedAt: new Date(),
     })
     .where(eq(userTable.id, userId));
@@ -40,7 +42,7 @@ export const PATCH = handle<{ id: string }>(async (req, { id: userId }) => {
     actor: me,
     action: b.role ? "user.role_changed" : "user.suspension_changed",
     target: userId,
-    detail: { from: u.role, ...b },
+    detail: { from: { role: u.role, location: u.location }, ...b },
     req,
   });
   return { ok: true };

@@ -1,12 +1,12 @@
-import { and, asc, eq, notInArray } from "drizzle-orm";
+import { and, asc, eq, isNull, notInArray } from "drizzle-orm";
 import { z } from "zod";
 
-import { db, rubricCriterion } from "@/lib/db";
+import { db, event, rubricCriterion } from "@/lib/db";
 import { id } from "@/lib/ids";
 import { audit } from "@/lib/server/audit";
-import { loadEvent, loadManagedEvent } from "@/lib/server/events";
-import { badRequest, handle, readBody } from "@/lib/server/http";
-import { requireRole, resolveIdentity } from "@/lib/server/identity";
+import { isEventCoach, loadEvent, loadManagedEvent } from "@/lib/server/events";
+import { badRequest, conflict, forbidden, handle, readBody } from "@/lib/server/http";
+import { requireUser, resolveIdentity } from "@/lib/server/identity";
 
 type P = { event: string };
 
@@ -26,11 +26,20 @@ const list = (eventId: string) =>
     .orderBy(asc(rubricCriterion.position));
 
 export const GET = handle<P>(async (req, { event: ref }) => {
-  const e = await loadEvent(ref, await resolveIdentity(req));
-  return { criteria: await list(e.id) };
+  const me = await resolveIdentity(req);
+  const e = await loadEvent(ref, me);
+  const coach = me ? me.role === "admin" || (await isEventCoach(e.id, me.userId)) : false;
+  const locked = e.workflow === "innolab" && e.pitchSelectionFinalizedAt !== null;
+  return {
+    criteria: await list(e.id),
+    revision: e.rubricRevision,
+    locked,
+    editable: coach && !locked,
+  };
 });
 
 const body = z.object({
+  revision: z.number().int().nonnegative(),
   criteria: z
     .array(
       z.object({
@@ -48,14 +57,31 @@ const body = z.object({
 });
 
 export const PUT = handle<P>(async (req, { event: ref }) => {
-  const me = await requireRole(req, "admin");
+  const me = await requireUser(req);
   const e = await loadManagedEvent(ref, me);
-  const { criteria } = await readBody(req, body);
+  if (e.workflow === "innolab" && e.pitchSelectionFinalizedAt) {
+    throw forbidden("La grille est verrouillée depuis la Promotion");
+  }
+  const { criteria, revision } = await readBody(req, body);
   if (new Set(criteria.map((c) => c.key)).size !== criteria.length) {
     throw badRequest("Each criterion needs a unique key");
   }
 
   await db.transaction(async (tx) => {
+    const [revisionRow] = await tx
+      .update(event)
+      .set({ rubricRevision: revision + 1, updatedAt: new Date() })
+      .where(
+        and(
+          eq(event.id, e.id),
+          eq(event.rubricRevision, revision),
+          e.workflow === "innolab" ? isNull(event.pitchSelectionFinalizedAt) : undefined
+        )
+      )
+      .returning({ revision: event.rubricRevision });
+    if (!revisionRow) {
+      throw conflict("La grille a été modifiée ou verrouillée. Rechargez-la avant de réessayer.");
+    }
     const keys = criteria.map((c) => c.key);
     await tx
       .delete(rubricCriterion)
@@ -92,5 +118,10 @@ export const PUT = handle<P>(async (req, { event: ref }) => {
     detail: { weights: Object.fromEntries(criteria.map((c) => [c.key, c.weight])) },
     req,
   });
-  return { criteria: await list(e.id) };
+  return {
+    criteria: await list(e.id),
+    revision: revision + 1,
+    locked: false,
+    editable: true,
+  };
 });

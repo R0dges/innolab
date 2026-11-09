@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db, project, team, teamMember, track, vote } from "@/lib/db";
 import { hasVoting, votingIsOpen } from "@/lib/phase";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { loadEvent } from "@/lib/server/events";
 import { handle } from "@/lib/server/http";
 import { resolveIdentity } from "@/lib/server/identity";
@@ -112,6 +113,7 @@ export const GET = handle<{ event: string }>(async (req, { event: ref }) => {
     maxVotesPerProject: maxVotesFor(e.voteBudget),
     projects: seededShuffle(shortlisted, voterKey).map(({ teamId, ...p }) => ({
       ...p,
+      trackName: EVENT_TRACKS_ENABLED ? p.trackName : null,
       ownTeam: teamId !== null && myTeamIds.has(teamId),
       myVotes: allocation.get(p.id) ?? 0,
     })),

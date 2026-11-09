@@ -2,17 +2,28 @@ import type { NextRequest } from "next/server";
 
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 
-import { db, event, project, registration, rubricCriterion, track } from "@/lib/db";
+import {
+  db,
+  event,
+  eventDocument,
+  eventJudge,
+  eventResource,
+  project,
+  registration,
+  rubricCriterion,
+  track,
+  user as userTable,
+} from "@/lib/db";
 import { DEFAULT_EVENT_LOCATION } from "@/lib/event-options";
 import { id } from "@/lib/ids";
-import { INTERNAL_INNOLAB_ONLY } from "@/lib/platform";
+import { EVENT_TRACKS_ENABLED, INTERNAL_INNOLAB_ONLY } from "@/lib/platform";
 import { docToText } from "@/lib/rich-text";
 import { DEFAULT_RUBRIC } from "@/lib/rubric";
 import { audit } from "@/lib/server/audit";
 import { badRequest, conflict, created, handle, readBody } from "@/lib/server/http";
 import { requireRole, resolveIdentity } from "@/lib/server/identity";
 import { eventInput } from "@/lib/server/schemas";
-import { innolabScheduleIssue, toDate } from "@/lib/server/validation";
+import { innolabScheduleIssue, judgingScheduleIssue, toDate } from "@/lib/server/validation";
 import { dispatch } from "@/lib/server/webhooks";
 
 /**
@@ -73,8 +84,13 @@ export const POST = handle(async (req: NextRequest) => {
   if (INTERNAL_INNOLAB_ONLY && b.workflow !== "innolab") {
     throw badRequest("Cette plateforme accepte uniquement les événements Innovation Lab");
   }
+  if (!EVENT_TRACKS_ENABLED && b.tracks.length > 0) {
+    throw badRequest("Les axes sont désactivés pour les événements Innovation Lab");
+  }
   const scheduleIssue = innolabScheduleIssue(b);
   if (scheduleIssue) throw badRequest(scheduleIssue);
+  const judgingIssue = judgingScheduleIssue(b);
+  if (judgingIssue) throw badRequest(judgingIssue);
 
   const [taken] = await db
     .select({ id: event.id })
@@ -84,7 +100,32 @@ export const POST = handle(async (req: NextRequest) => {
   if (taken) throw conflict("That URL is already taken — choose another slug");
 
   const eventId = id.event();
+  const eventLocation = b.location || me.location || DEFAULT_EVENT_LOCATION;
   await db.transaction(async (tx) => {
+    if (b.visibility === "published") {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`active-event:${eventLocation}`}))`
+      );
+      const [active] = await tx
+        .select({ name: event.name, creator: userTable.name })
+        .from(event)
+        .leftJoin(userTable, eq(userTable.id, event.createdBy))
+        .where(
+          and(
+            eq(event.location, eventLocation),
+            eq(event.visibility, "published"),
+            sql`${event.activatedAt} is not null`,
+            sql`${event.cancelledAt} is null`,
+            sql`${event.archivedAt} is null`
+          )
+        )
+        .limit(1);
+      if (active) {
+        throw conflict(
+          `Un événement est déjà actif à ${eventLocation} : "${active.name}", créé par ${active.creator ?? "un coach"}.`
+        );
+      }
+    }
     await tx.insert(event).values({
       id: eventId,
       slug: b.slug,
@@ -94,7 +135,7 @@ export const POST = handle(async (req: NextRequest) => {
       content: b.content ?? null,
       rules: b.rules ?? null,
       mode: b.mode,
-      location: b.mode === "online" ? null : b.location || DEFAULT_EVENT_LOCATION,
+      location: eventLocation,
       hue: b.hue,
       visibility: b.visibility,
       workflow: "innolab",
@@ -104,6 +145,7 @@ export const POST = handle(async (req: NextRequest) => {
       pitchVotingClose: toDate(b.pitchVotingClose),
       submissionsOpen: toDate(b.submissionsOpen),
       submissionsClose: new Date(b.submissionsClose),
+      judgingOpen: toDate(b.judgingOpen),
       judgingClose: toDate(b.judgingClose),
       votingOpen: toDate(b.votingOpen),
       votingClose: toDate(b.votingClose),
@@ -116,8 +158,35 @@ export const POST = handle(async (req: NextRequest) => {
       votingShortlistSize: b.votingShortlistSize,
       votingElectorateLockAt: toDate(b.votingElectorateLockAt),
       createdBy: me.userId,
+      activatedAt: b.visibility === "published" ? new Date() : null,
     });
-    if (b.tracks.length) {
+    if (b.visibility === "published") {
+      const accounts = await tx
+        .select({ id: userTable.id, role: userTable.role })
+        .from(userTable)
+        .where(
+          and(
+            eq(userTable.location, eventLocation),
+            eq(userTable.banned, false),
+            inArray(userTable.role, ["participant", "judge", "organizer"])
+          )
+        );
+      const participants = accounts.filter((account) => account.role === "participant");
+      const coaches = accounts.filter((account) => ["judge", "organizer"].includes(account.role));
+      if (participants.length) {
+        await tx
+          .insert(registration)
+          .values(participants.map((account) => ({ eventId, userId: account.id })))
+          .onConflictDoNothing();
+      }
+      if (coaches.length) {
+        await tx
+          .insert(eventJudge)
+          .values(coaches.map((account) => ({ eventId, userId: account.id })))
+          .onConflictDoNothing();
+      }
+    }
+    if (EVENT_TRACKS_ENABLED && b.tracks.length) {
       await tx
         .insert(track)
         .values(b.tracks.map((name, position) => ({ id: id.track(), eventId, name, position })));
@@ -130,9 +199,52 @@ export const POST = handle(async (req: NextRequest) => {
         position,
       }))
     );
+    if (b.auditDocument) {
+      await tx.insert(eventDocument).values({
+        id: id.eventDocument(),
+        eventId,
+        kind: "audit",
+        title: b.auditDocument.title,
+        url: b.auditDocument.url,
+        summary: b.auditDocument.summary ?? null,
+        findings: b.auditDocument.findings,
+        problems: b.auditDocument.problems,
+        version: 1,
+        isCurrent: true,
+        createdBy: me.userId,
+      });
+    }
+    if (b.resources.length) {
+      await tx.insert(eventResource).values(
+        b.resources.map((resource, position) => ({
+          id: id.eventResource(),
+          eventId,
+          kind: resource.kind,
+          name: resource.name,
+          category: resource.category,
+          description: resource.description ?? null,
+          url: resource.url ?? null,
+          accessLevel: resource.accessLevel,
+          availability: resource.availability,
+          ownerName: resource.ownerName ?? null,
+          position: resource.position || position,
+          createdBy: me.userId,
+        }))
+      );
+    }
   });
 
-  await audit({ eventId, actor: me, action: "event.created", target: eventId, req });
+  await audit({
+    eventId,
+    actor: me,
+    action: "event.created",
+    target: eventId,
+    detail: {
+      auditDocument: Boolean(b.auditDocument),
+      resources: b.resources.length,
+    },
+    req,
+  });
   dispatch("event.created", { name: b.name, slug: b.slug }, eventId);
   return created({ id: eventId, slug: b.slug });
 });

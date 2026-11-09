@@ -34,27 +34,22 @@ import {
   TableHeader,
   TableRow,
 } from "@juryza/ui/components/ui/table";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@juryza/ui/components/ui/tooltip";
 
 import { PageHeader, Section, StatCard } from "@/components/page";
 import { api } from "@/lib/api";
 import { formatDate, formatDateTime, pluralize } from "@/lib/format";
-import { useEvent } from "@/lib/queries";
 import type { Certificate, Json } from "@/lib/types";
 
 /**
- * Certificates: issue signed judge-participation and prize-winner records in
- * bulk. Each one carries an HMAC-SHA256 signature over its fields, so anyone
- * can verify it at /certificates/<serial> without an account.
+ * Certificates: issue signed judge-participation records in bulk. Winner
+ * rewards are deferred; the current recognition is the public Wall of Fame.
  */
 
-type Kind = "judges" | "winners";
+type Kind = "judges";
 
 export default function CertificatesPage() {
   const { slug } = useParams<{ slug: string }>();
   const qc = useQueryClient();
-  const { data: detail } = useEvent(slug);
-  const published = detail?.event.resultsPublished ?? false;
   const { data, isLoading, error } = useQuery({
     queryKey: ["certificates", slug],
     queryFn: () =>
@@ -64,36 +59,27 @@ export default function CertificatesPage() {
   const issue = useMutation({
     mutationFn: (kind: Kind) =>
       api.post<{ issued: number; serials: string[] }>(`/api/events/${slug}/certificates`, { kind }),
-    onSuccess: (res, kind) => {
+    onSuccess: (res) => {
       toast.success(
         res.issued
           ? `Issued ${pluralize(res.issued, "certificate")}`
-          : `Everyone eligible already has a ${kind === "judges" ? "judge" : "winner"} certificate`
+          : "Every eligible coach already has a certificate"
       );
       qc.invalidateQueries({ queryKey: ["certificates", slug] });
     },
     onError: (e) => toast.error(e.message),
   });
 
-  const certs = data?.certificates ?? [];
-  const judges = certs.filter((c) => c.kind === "judge").length;
-  const winners = certs.filter((c) => c.kind === "winner").length;
-
-  const winnersButton = (
-    <Button disabled={!published || issue.isPending} onClick={() => issue.mutate("winners")}>
-      {issue.isPending && issue.variables === "winners" ? <Spinner /> : <Trophy />} Issue winner
-      certificates
-    </Button>
-  );
+  const certs = (data?.certificates ?? []).filter((certificate) => certificate.kind === "judge");
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Certificates"
-        description="Tamper-evident records for your judges and winners, verifiable by anyone with the serial."
+        title="Certificats des coachs"
+        description="Attestations vérifiables pour les coachs ayant participé à l’évaluation."
       />
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -115,32 +101,16 @@ export default function CertificatesPage() {
             </Button>
           </CardFooter>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Trophy className="size-4" /> Winner certificates
-            </CardTitle>
-            <CardDescription>
-              One per team member, per prize won, naming the project. Available once results are
-              published.
-            </CardDescription>
-          </CardHeader>
-          <CardFooter>
-            {published ? (
-              winnersButton
-            ) : (
-              <Tooltip>
-                <TooltipTrigger render={<span className="inline-flex" />}>
-                  {winnersButton}
-                </TooltipTrigger>
-                <TooltipContent>
-                  Publish results first — winners aren't final until then.
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </CardFooter>
-        </Card>
       </div>
+
+      <Alert>
+        <Trophy />
+        <AlertTitle>Reconnaissance des équipes gagnantes</AlertTitle>
+        <AlertDescription>
+          Les récompenses et certificats de gagnants seront ajoutés plus tard. Actuellement,
+          l’équipe classée première est mise à l’honneur sur la page de l’événement.
+        </AlertDescription>
+      </Alert>
 
       <Alert>
         <Fingerprint />
@@ -154,10 +124,9 @@ export default function CertificatesPage() {
         </AlertDescription>
       </Alert>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <StatCard label="Issued" value={isLoading ? "…" : certs.length} icon={BadgeCheck} />
-        <StatCard label="Judges" value={isLoading ? "…" : judges} />
-        <StatCard label="Winners" value={isLoading ? "…" : winners} />
+        <StatCard label="Coachs" value={isLoading ? "…" : certs.length} />
       </div>
 
       <Section title="Issued certificates">
@@ -175,10 +144,7 @@ export default function CertificatesPage() {
                 <Award />
               </EmptyMedia>
               <EmptyTitle>Nothing issued yet</EmptyTitle>
-              <EmptyDescription>
-                Issue judge certificates when judging wraps up, winner certificates after
-                publishing.
-              </EmptyDescription>
+              <EmptyDescription>Issue coach certificates when judging wraps up.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
@@ -208,11 +174,8 @@ export default function CertificatesPage() {
                       </TableCell>
                       <TableCell className="font-medium">{c.subjectName}</TableCell>
                       <TableCell>
-                        <Badge
-                          variant={c.kind === "winner" ? "default" : "secondary"}
-                          className="capitalize"
-                        >
-                          {c.kind === "winner" ? <Trophy /> : <Gavel />} {c.kind}
+                        <Badge variant="secondary" className="capitalize">
+                          <Gavel /> coach
                         </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground max-w-md min-w-64 text-sm whitespace-normal">

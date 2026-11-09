@@ -25,6 +25,7 @@ export interface EventDates {
   pitchVotingClose?: Date | string | null;
   submissionsOpen: Date | string | null;
   submissionsClose: Date | string;
+  judgingOpen?: Date | string | null;
   judgingClose?: Date | string | null;
   votingOpen: Date | string | null;
   votingClose: Date | string | null;
@@ -37,6 +38,17 @@ export function submissionsAreOpen(e: EventDates, now = Date.now()): boolean {
   const open = t(e.submissionsOpen);
   const close = t(e.submissionsClose) ?? 0;
   return (open === null || now >= open) && now < close;
+}
+
+/**
+ * Project scoring is private to the jury and uses an explicit window. Legacy
+ * events without `judgingOpen` start at the project submission deadline.
+ */
+export function judgingIsOpen(e: EventDates, now = Date.now()): boolean {
+  if (e.resultsPublished) return false;
+  const open = t(e.judgingOpen) ?? t(e.submissionsClose);
+  const close = t(e.judgingClose);
+  return (open === null || now >= open) && (close === null || now < close);
 }
 
 /** Voting needs an explicit window; an event without one has no community vote. */
@@ -78,7 +90,7 @@ export const PHASE_LABEL: Record<Phase, string> = {
   "pitch-voting": "Idea voting",
   "team-formation": "Team formation",
   submissions: "Submissions open",
-  judging: "Judging",
+  judging: "Délibération du jury",
   voting: "Community voting",
   results: "Results published",
 };
@@ -117,7 +129,12 @@ export function milestones(e: EventDates) {
     },
     { key: "close", label: "Submission deadline", at: new Date(e.submissionsClose) },
     {
-      key: "judging",
+      key: "judgingOpen",
+      label: "Judging opens",
+      at: e.judgingOpen ? new Date(e.judgingOpen) : null,
+    },
+    {
+      key: "judgingClose",
       label: "Judging closes",
       at: e.judgingClose ? new Date(e.judgingClose) : null,
     },

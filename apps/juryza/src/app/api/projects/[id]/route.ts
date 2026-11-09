@@ -3,14 +3,24 @@ import type { NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
 
 import type { Event, Project } from "@/lib/db";
-import { db, event, project, team, teamMember, track, user as userTable } from "@/lib/db";
+import {
+  db,
+  event,
+  project,
+  registration,
+  team,
+  teamMember,
+  track,
+  user as userTable,
+} from "@/lib/db";
 import { submissionsAreOpen } from "@/lib/phase";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { docToText } from "@/lib/rich-text";
 import { audit } from "@/lib/server/audit";
-import { canManage } from "@/lib/server/events";
-import { forbidden, handle, notFound, readBody } from "@/lib/server/http";
+import { isEventCoach } from "@/lib/server/events";
+import { badRequest, forbidden, handle, notFound, readBody } from "@/lib/server/http";
 import type { Identity } from "@/lib/server/identity";
-import { requireUser, resolveIdentity } from "@/lib/server/identity";
+import { requireUser } from "@/lib/server/identity";
 import { projectInput } from "@/lib/server/schemas";
 import { dispatch } from "@/lib/server/webhooks";
 
@@ -48,7 +58,7 @@ async function membership(me: Identity | null, p: Project) {
 }
 
 async function editRights(me: Identity | null, p: Project, e: Event) {
-  const manager = canManage(me, e);
+  const manager = Boolean(me && (me.role === "admin" || (await isEventCoach(e.id, me.userId))));
   const role = await membership(me, p);
   return {
     manager,
@@ -59,11 +69,18 @@ async function editRights(me: Identity | null, p: Project, e: Event) {
 }
 
 export const GET = handle<P>(async (req: NextRequest, { id: projectId }) => {
-  const me = await resolveIdentity(req);
+  const me = await requireUser(req);
   const { project: p, event: e } = await load(projectId);
   const rights = await editRights(me, p, e);
-  const publicEvent = e.visibility === "published" || rights.manager;
-  if ((p.status !== "submitted" || !publicEvent) && !rights.member && !rights.manager) {
+  const [registered] = await db
+    .select({ userId: registration.userId })
+    .from(registration)
+    .where(and(eq(registration.eventId, e.id), eq(registration.userId, me.userId)))
+    .limit(1);
+  if (!registered && !rights.member && !rights.manager) {
+    throw notFound("Project not found");
+  }
+  if (p.status !== "submitted" && !rights.member && !rights.manager) {
     throw notFound("Project not found");
   }
 
@@ -82,14 +99,16 @@ export const GET = handle<P>(async (req: NextRequest, { id: projectId }) => {
           .innerJoin(userTable, eq(userTable.id, teamMember.userId))
           .where(eq(teamMember.teamId, p.teamId))
       : Promise.resolve([]),
-    p.trackId ? db.select().from(track).where(eq(track.id, p.trackId)) : Promise.resolve([]),
+    EVENT_TRACKS_ENABLED && p.trackId
+      ? db.select().from(track).where(eq(track.id, p.trackId))
+      : Promise.resolve([]),
     p.teamId
       ? db.select({ id: team.id, name: team.name }).from(team).where(eq(team.id, p.teamId))
       : Promise.resolve([]),
   ]);
 
   return {
-    project: p,
+    project: EVENT_TRACKS_ENABLED ? p : { ...p, trackId: null },
     event: {
       id: e.id,
       slug: e.slug,
@@ -98,7 +117,18 @@ export const GET = handle<P>(async (req: NextRequest, { id: projectId }) => {
       hue: e.hue,
     },
     track: trackRow ?? null,
-    team: teamRow ? { ...teamRow, members } : null,
+    team: teamRow
+      ? {
+          id: teamRow.id,
+          name: p.title,
+          members: members.map((member) => ({
+            ...member,
+            name: member.name
+              ? `${member.name.split(/\s+/)[0]} ${member.name.split(/\s+/).at(-1)?.[0] ?? ""}.`.trim()
+              : "Participant",
+          })),
+        }
+      : null,
     viewer: { ...rights, submissionsOpen: submissionsAreOpen(e) },
   };
 });
@@ -117,11 +147,14 @@ export const PATCH = handle<P>(async (req, { id: projectId }) => {
     .catch(() => ({}))) as Record<string, unknown>;
   const b = await readBody(req, projectInput.partial());
   const sent = (k: string) => Object.hasOwn(raw, k);
+  if (!EVENT_TRACKS_ENABLED && sent("trackId") && b.trackId) {
+    throw badRequest("Les axes sont désactivés");
+  }
 
   const patch: Partial<Project> = { updatedAt: new Date() };
   if (sent("title") && b.title) patch.title = b.title;
   if (sent("tagline")) patch.tagline = b.tagline ?? null;
-  if (sent("trackId")) patch.trackId = b.trackId ?? null;
+  if (sent("trackId")) patch.trackId = EVENT_TRACKS_ENABLED ? (b.trackId ?? null) : null;
   if (sent("content")) {
     patch.content = b.content ?? null;
     patch.description = docToText(b.content);

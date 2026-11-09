@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { certificate, db, eventJudge, score, user as userTable } from "@/lib/db";
 import { id } from "@/lib/ids";
+import { EVENT_REWARDS_ENABLED } from "@/lib/platform";
 import { audit } from "@/lib/server/audit";
 import { newSerial, signCertificate } from "@/lib/server/certificates";
 import { loadManagedEvent } from "@/lib/server/events";
@@ -38,6 +39,9 @@ export const POST = handle<P>(async (req, { event: ref }) => {
   const me = await requireUser(req);
   const e = await loadManagedEvent(ref, me);
   const { kind } = await readBody(req, z.object({ kind: z.enum(["judges", "winners"]) }));
+  if (kind === "winners" && !EVENT_REWARDS_ENABLED) {
+    throw forbidden("Winner rewards and certificates are not enabled yet");
+  }
 
   const existing = await db
     .select({

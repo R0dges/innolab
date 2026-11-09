@@ -69,9 +69,9 @@ import { api } from "@/lib/api";
 import {
   DEFAULT_EVENT_LOCATION,
   DEFAULT_EVENT_WORKFLOW,
-  eventLocationOptions,
   type EventMode,
   type EventWorkflow,
+  eventLocationOptions,
 } from "@/lib/event-options";
 import { eventKey, useEvent } from "@/lib/queries";
 import type { Event, Json, RichDoc } from "@/lib/types";
@@ -95,6 +95,7 @@ interface Form {
   pitchVotingClose: string;
   submissionsOpen: string;
   submissionsClose: string;
+  judgingOpen: string;
   judgingClose: string;
   votingOpen: string;
   votingClose: string;
@@ -117,6 +118,7 @@ const DATE_KEYS = [
   "pitchVotingClose",
   "submissionsOpen",
   "submissionsClose",
+  "judgingOpen",
   "judgingClose",
   "votingOpen",
   "votingClose",
@@ -126,13 +128,19 @@ const DATE_KEYS = [
 const PROJECT_DATE_KEYS = [
   "submissionsOpen",
   "submissionsClose",
+  "judgingOpen",
   "judgingClose",
   "votingOpen",
   "votingClose",
   "votingElectorateLockAt",
 ] as const;
 
-const INNOLAB_PROJECT_DATE_KEYS = ["submissionsOpen", "submissionsClose", "judgingClose"] as const;
+const INNOLAB_PROJECT_DATE_KEYS = [
+  "submissionsOpen",
+  "submissionsClose",
+  "judgingOpen",
+  "judgingClose",
+] as const;
 
 const PITCH_KEYS = [
   "workflow",
@@ -166,6 +174,7 @@ function toForm(e: Json<Event>): Form {
     pitchVotingClose: toLocalInput(e.pitchVotingClose),
     submissionsOpen: toLocalInput(e.submissionsOpen),
     submissionsClose: toLocalInput(e.submissionsClose),
+    judgingOpen: toLocalInput(e.judgingOpen),
     judgingClose: toLocalInput(e.judgingClose),
     votingOpen: toLocalInput(e.votingOpen),
     votingClose: toLocalInput(e.votingClose),
@@ -440,8 +449,14 @@ function SettingsForm({ event }: { event: Json<Event> }) {
               onChange={(v) => set("submissionsClose", v)}
             />
             <DateInput
+              id="judgingOpen"
+              label="Ouverture des évaluations"
+              value={form.judgingOpen}
+              onChange={(v) => set("judgingOpen", v)}
+            />
+            <DateInput
               id="judgingClose"
-              label="Judging closes"
+              label="Clôture des délibérations"
               value={form.judgingClose}
               onChange={(v) => set("judgingClose", v)}
             />
@@ -705,7 +720,7 @@ function SettingsForm({ event }: { event: Json<Event> }) {
                 <FieldDescription>
                   {saved.visibility === "published"
                     ? "Anyone can find the event, register and view submitted projects. Unpublishing hides it again."
-                    : "Nobody else can see this event yet. Publish when details, dates and tracks are ready."}
+                    : "Nobody else can see this event yet. Publish when details and dates are ready."}
                 </FieldDescription>
               </FieldContent>
               {pending === "Visibility" ? (
@@ -733,12 +748,17 @@ function scheduleProblem(f: Form): string | null {
   const t = (v: string) => (v ? new Date(v).getTime() : null);
   const open = t(f.submissionsOpen);
   const close = t(f.submissionsClose);
-  const judging = t(f.judgingClose);
+  const judgingOpen = t(f.judgingOpen);
+  const judgingClose = t(f.judgingClose);
   const vOpen = t(f.votingOpen);
   const vClose = t(f.votingClose);
   if (close === null) return "The submission deadline is required.";
   if (open !== null && open >= close) return "Submissions must open before the deadline.";
-  if (judging !== null && judging <= close)
+  if (judgingOpen !== null && judgingOpen < close)
+    return "Judging must open at or after the submission deadline.";
+  if (judgingOpen !== null && judgingClose !== null && judgingClose <= judgingOpen)
+    return "Judging must close after it opens.";
+  if (judgingOpen === null && judgingClose !== null && judgingClose <= close)
     return "Judging must close after the submission deadline.";
   if (f.workflow !== "innolab" && vOpen !== null && vClose !== null && vOpen >= vClose)
     return "Voting must open before it closes.";

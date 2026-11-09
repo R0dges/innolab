@@ -110,11 +110,23 @@ describe.skipIf(!BASE)("API integrity rules", () => {
       pitchVotingClose: iso(3),
       submissionsOpen: iso(4),
       submissionsClose: iso(24),
+      auditDocument: {
+        title: "Audit initial",
+        url: "https://example.com/audit",
+      },
+      resources: [
+        {
+          kind: "accessible",
+          name: "Base documentaire",
+          category: "Documentation",
+          url: "https://example.com/resources",
+        },
+      ],
     };
 
-    expect(
-      (await call("/api/events", { as: as.participant, method: "POST", body })).status
-    ).toBe(403);
+    expect((await call("/api/events", { as: as.participant, method: "POST", body })).status).toBe(
+      403
+    );
 
     const created = await call("/api/events", { as: as.judgeA, method: "POST", body });
     expect(created.status).toBe(201);
@@ -123,6 +135,19 @@ describe.skipIf(!BASE)("API integrity rules", () => {
       expect((await call(`/api/events/${slug}/overview`, { as: as.judgeA })).status).toBe(200);
       const rubric = obj((await call(`/api/events/${slug}/rubric`, { as: as.judgeA })).data);
       expect(rubric.criteria).toHaveLength(6);
+      const documents = obj((await call(`/api/events/${slug}/documents`, { as: as.judgeA })).data);
+      expect(documents.documents).toHaveLength(1);
+      const resources = obj((await call(`/api/events/${slug}/resources`, { as: as.judgeA })).data);
+      expect(resources.resources).toHaveLength(1);
+      expect(
+        (
+          await call(`/api/events/${slug}/prizes`, {
+            as: as.judgeA,
+            method: "PUT",
+            body: { prizes: [] },
+          })
+        ).status
+      ).toBe(403);
 
       const coachUpdate = await call(`/api/events/${slug}/rubric`, {
         as: as.judgeA,
@@ -130,10 +155,32 @@ describe.skipIf(!BASE)("API integrity rules", () => {
         body: { criteria: rubric.criteria },
       });
       expect(coachUpdate.status).toBe(403);
+
+      const judgeB = obj(obj((await call("/api/me", { as: as.judgeB })).data).user);
+      const added = await call(`/api/events/${slug}/judges`, {
+        as: as.judgeA,
+        method: "POST",
+        body: { email: judgeB.email },
+      });
+      expect(added.status).toBe(201);
+
+      const delegatedPanel = await call(`/api/events/${slug}/judges`, { as: as.judgeB });
+      expect(delegatedPanel.status).toBe(200);
+      expect(obj(delegatedPanel.data).canInvite).toBe(true);
+      expect(obj(delegatedPanel.data).canRemove).toBe(false);
+      expect((await call(`/api/events/${slug}`, { as: as.judgeB })).status).toBe(200);
+
+      const delegatedInvite = await call(`/api/events/${slug}/judges`, {
+        as: as.judgeB,
+        method: "POST",
+        body: { email: `delegated-${stamp}@example.invalid` },
+      });
+      expect(delegatedInvite.status).toBe(201);
+      expect(obj(delegatedInvite.data).status).toBe("invited");
     } finally {
-      expect(
-        (await call(`/api/events/${slug}`, { as: as.judgeA, method: "DELETE" })).status
-      ).toBe(200);
+      expect((await call(`/api/events/${slug}`, { as: as.judgeA, method: "DELETE" })).status).toBe(
+        200
+      );
     }
   });
 
@@ -320,10 +367,68 @@ describe.skipIf(!BASE)("API integrity rules", () => {
 
       expect((await call(`/api/events/${slug}/documents`)).status).toBe(403);
       expect((await call(`/api/events/${slug}/resources`)).status).toBe(403);
+      expect(obj((await call(`/api/events/${slug}/dashboard`)).data).assistant).toBeNull();
+
+      const assistantUrl = "https://copilot.microsoft.com/event-assistant";
+      expect(
+        (
+          await call(`/api/events/${slug}/assistant`, {
+            as: as.organizer,
+            method: "PATCH",
+            body: { url: assistantUrl },
+          })
+        ).status
+      ).toBe(200);
+      expect(obj((await call(`/api/events/${slug}/dashboard`)).data).assistant).toBeNull();
+
+      const judgeProfile = obj((await call("/api/me", { as: as.judgeA })).data);
+      const judgeEmail = String(obj(judgeProfile.user).email);
+      expect(
+        (
+          await call(`/api/events/${slug}/judges`, {
+            as: as.organizer,
+            method: "POST",
+            body: { email: judgeEmail },
+          })
+        ).status
+      ).toBe(201);
+      const coachAssistantUrl = "https://copilot.microsoft.com/event-assistant-coach";
+      expect(
+        (
+          await call(`/api/events/${slug}/assistant`, {
+            as: as.judgeA,
+            method: "PATCH",
+            body: { url: coachAssistantUrl },
+          })
+        ).status
+      ).toBe(200);
+
       expect(
         (await call(`/api/events/${slug}/registration`, { as: as.participant, method: "POST" }))
           .status
       ).toBe(200);
+      expect(
+        obj((await call(`/api/events/${slug}/dashboard`, { as: as.participant })).data).assistant
+      ).toEqual({ url: coachAssistantUrl });
+      expect(
+        (
+          await call(`/api/events/${slug}/assistant`, {
+            as: as.participant,
+            method: "PATCH",
+            body: { url: "https://example.test/unauthorized" },
+          })
+        ).status
+      ).toBe(403);
+
+      const assistantAudit = obj(
+        (
+          await call(`/api/events/${slug}/audit?action=event_assistant`, {
+            as: as.organizer,
+          })
+        ).data
+      );
+      expect(JSON.stringify(assistantAudit)).not.toContain(assistantUrl);
+      expect(JSON.stringify(assistantAudit)).not.toContain(coachAssistantUrl);
 
       const firstDocument = await call(`/api/events/${slug}/documents`, {
         as: as.organizer,
@@ -622,13 +727,13 @@ describe.skipIf(!BASE)("API integrity rules", () => {
       const organizerJudgeInvite = await call(`/api/events/${slug}/judges`, {
         as: as.organizer,
         method: "POST",
-        body: { email: `blocked-judge-${stamp}@example.test`, trackIds: [] },
+        body: { email: `invited-coach-${stamp}@example.test`, trackIds: [] },
       });
-      expect(organizerJudgeInvite.status).toBe(403);
-      expect(obj(organizerJudgeInvite.data).error).toMatch(/platform admins/i);
+      expect(organizerJudgeInvite.status).toBe(201);
+      expect(obj(organizerJudgeInvite.data).status).toBe("invited");
       const panel = obj((await call(`/api/events/${slug}/judges`, { as: as.organizer })).data);
-      expect(panel.canManage).toBe(false);
-      expect(panel.invites).toEqual([]);
+      expect(panel.canRemove).toBe(false);
+      expect(panel.invites).toHaveLength(1);
 
       expect(
         (await call(`/api/events/${slug}/registration`, { as: as.participant, method: "POST" }))
@@ -812,25 +917,53 @@ describe.skipIf(!BASE)("API integrity rules", () => {
       });
       expect(selection.status).toBe(200);
       const selectionData = obj(selection.data);
-      const selectedIds = selectionData.selected as string[];
+      expect(selectionData.finalized).toBe(false);
+      const tieBreak = obj(selectionData.tieBreak);
+      const tiedPitchIds = tieBreak.candidatePitchIds as string[];
+      expect(tiedPitchIds).toHaveLength(5);
+      expect(tieBreak.slots).toBe(4);
+
+      const participantTieVote = await call(`/api/events/${slug}/pitch-selection/tie-break`, {
+        as: as.participant,
+        method: "POST",
+        body: { pitchIds: tiedPitchIds.slice(0, 4) },
+      });
+      expect(participantTieVote.status).toBe(403);
+      const coachTieVote = await call(`/api/events/${slug}/pitch-selection/tie-break`, {
+        as: as.organizer,
+        method: "POST",
+        body: { pitchIds: tiedPitchIds.slice(0, 4) },
+      });
+      expect(coachTieVote.status).toBe(200);
+
+      const concurrentFinalizations = await Promise.all([
+        call(`/api/events/${slug}/pitch-selection`, {
+          as: as.organizer,
+          method: "POST",
+          body: { count: 5 },
+        }),
+        call(`/api/events/${slug}/pitch-selection`, {
+          as: as.organizer,
+          method: "POST",
+          body: { count: 5 },
+        }),
+      ]);
+      expect(concurrentFinalizations.map((response) => response.status).toSorted()).toEqual([
+        200, 409,
+      ]);
+      const finalizedSelection = concurrentFinalizations.find((response) => response.status === 200);
+      expect(finalizedSelection).toBeDefined();
+      const finalizedData = obj(finalizedSelection?.data);
+      expect(finalizedData.finalized).toBe(true);
+      const selectedIds = finalizedData.selected as string[];
       expect(selectedIds).toHaveLength(5);
       expect(selectedIds).toContain(firstChoice);
-      expect(obj(selectionData.tieBreak).candidatePitchIds).not.toEqual([]);
-      const automaticProjects = selectionData.projects as {
+      const automaticProjects = finalizedData.projects as {
         pitchId: string;
         projectId: string;
         teamId: string;
       }[];
       expect(automaticProjects).toHaveLength(5);
-      expect(
-        (
-          await call(`/api/events/${slug}/pitch-selection`, {
-            as: as.organizer,
-            method: "POST",
-            body: { count: 5 },
-          })
-        ).status
-      ).toBe(409);
 
       const mainProject = automaticProjects.find((entry) => entry.pitchId === firstChoice);
       expect(mainProject).toBeDefined();
@@ -907,18 +1040,16 @@ describe.skipIf(!BASE)("API integrity rules", () => {
 
       const projectOwner = pitchAuthors[4];
       expect(projectOwner).toBeDefined();
-      const ownerTeam = obj(
-        (await call(`/api/teams/${teamId}`, { as: projectOwner })).data
-      );
+      const ownerTeam = obj((await call(`/api/teams/${teamId}`, { as: projectOwner })).data);
       const ownerId = String(
         (ownerTeam.members as { id: string; role: string }[]).find(
           (member) => member.role === "owner"
         )?.id
       );
-      const ownerCannotLeave = await call(
-        `/api/teams/${teamId}/members/${ownerId}`,
-        { as: projectOwner, method: "DELETE" }
-      );
+      const ownerCannotLeave = await call(`/api/teams/${teamId}/members/${ownerId}`, {
+        as: projectOwner,
+        method: "DELETE",
+      });
       expect(ownerCannotLeave.status).toBe(403);
       expect(obj(ownerCannotLeave.data).error).toMatch(/responsable initial/i);
       const pendingRequests = obj(

@@ -7,6 +7,7 @@ import {
   EVENT_MODES,
   EVENT_WORKFLOWS,
 } from "@/lib/event-options";
+import { documentInput, resourceInput } from "@/lib/server/event-workspace";
 import { isoDate, optionalDate, optionalUrl, richDoc, slug } from "@/lib/server/validation";
 
 /**
@@ -32,6 +33,7 @@ const eventFields = {
   pitchVotingClose: optionalDate,
   submissionsOpen: optionalDate,
   submissionsClose: isoDate,
+  judgingOpen: optionalDate,
   judgingClose: optionalDate,
   votingOpen: optionalDate,
   votingClose: optionalDate,
@@ -63,6 +65,8 @@ export const eventInput = z.object({
   votingShortlistSize: eventFields.votingShortlistSize.default(0),
   votingElectorateLockAt: eventFields.votingElectorateLockAt,
   tracks: z.array(z.string().trim().min(1).max(60)).max(30).default([]),
+  auditDocument: documentInput.optional(),
+  resources: z.array(resourceInput).max(30).default([]),
 });
 
 export const eventPatch = z.object(eventFields).partial();

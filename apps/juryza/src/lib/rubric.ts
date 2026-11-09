@@ -10,32 +10,36 @@ export const DEFAULT_RUBRIC = [
   {
     key: "strategic_alignment",
     label: "Alignement stratégique",
-    description: "Le projet répond clairement à la problématique et aux enjeux de l’événement.",
+    description:
+      "Le projet répond clairement à une problématique identifiée dans l’audit et s’inscrit dans les enjeux de l’organisation.",
     weight: 1,
   },
   {
     key: "relevance_coherence",
-    label: "Pertinence et cohérence",
-    description: "La solution est pertinente ; le raisonnement est logique et cohérent.",
+    label: "Pertinence & cohérence",
+    description:
+      "La solution répond de manière pertinente au problème identifié. L’ensemble du raisonnement est logique et cohérent.",
     weight: 1,
   },
   {
     key: "feasibility",
     label: "Faisabilité",
-    description: "Le projet est réaliste et réalisable avec les moyens disponibles.",
+    description:
+      "Le projet est réaliste et peut être mis en œuvre avec les moyens définis par l’équipe.",
     weight: 1,
   },
   {
     key: "solution_clarity",
-    label: "Clarté de la solution",
-    description: "Le jury comprend concrètement la proposition et son fonctionnement.",
+    label: "Solution claire",
+    description:
+      "Le jury comprend concrètement ce qui est proposé et à quoi ressemble la solution.",
     weight: 1,
   },
   {
-    key: "support_quality",
-    label: "Qualité du support",
+    key: "identity",
+    label: "Identité",
     description:
-      "Le support et la présentation renforcent la compréhension et l’identité du projet.",
+      "Le support et la manière de présenter respectent l’identité attendue de l’organisation.",
     weight: 1,
   },
   {

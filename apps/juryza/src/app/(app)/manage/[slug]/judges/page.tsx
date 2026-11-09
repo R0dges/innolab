@@ -63,6 +63,7 @@ import { PageHeader, Section, StatCard } from "@/components/page";
 import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/lib/api";
 import { formatDateTime, formatNumber, relativeTime } from "@/lib/format";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { eventKey, useEvent } from "@/lib/queries";
 
 /**
@@ -92,7 +93,8 @@ interface Invite {
   inviteUrl: string;
 }
 interface Panel {
-  canManage: boolean;
+  canInvite: boolean;
+  canRemove: boolean;
   judges: PanelJudge[];
   invites: Invite[];
 }
@@ -143,9 +145,9 @@ export default function JudgesPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Judges"
-        description="Your judging panel, the tracks each judge covers, and their progress through assigned reviews. Innolab judges are appointed by platform admins."
+        description="Your judging panel and its progress through assigned reviews. Existing judges can invite other judges."
         actions={
-          data?.canManage ? (
+          data?.canInvite ? (
             <Button onClick={() => setInviteOpen(true)}>
               <MailPlus /> Invite judge
             </Button>
@@ -153,12 +155,12 @@ export default function JudgesPage() {
         }
       />
 
-      {data && !data.canManage && detail?.event.workflow === "innolab" && (
+      {data && !data.canRemove && detail?.event.workflow === "innolab" && (
         <Alert>
-          <AlertTitle>Admin-managed jury</AlertTitle>
+          <AlertTitle>Shared invitations, admin-controlled removals</AlertTitle>
           <AlertDescription>
-            You can follow the panel and its progress, but only a platform admin can appoint,
-            update, or remove Innolab judges.
+            Every judge on this panel can invite another judge. Only a platform admin can remove an
+            Innolab judge or revoke a pending invitation.
           </AlertDescription>
         </Alert>
       )}
@@ -202,7 +204,7 @@ export default function JudgesPage() {
               Invite judges by email. Anyone with an account joins the panel straight away.
             </EmptyDescription>
           </EmptyHeader>
-          {data?.canManage && (
+          {data?.canInvite && (
             <Button onClick={() => setInviteOpen(true)}>
               <MailPlus /> Invite judge
             </Button>
@@ -215,12 +217,12 @@ export default function JudgesPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="pl-4">Judge</TableHead>
-                  <TableHead>Tracks</TableHead>
+                  {EVENT_TRACKS_ENABLED && <TableHead>Tracks</TableHead>}
                   <TableHead className="text-right">Assigned</TableHead>
                   <TableHead className="text-right">Scored</TableHead>
                   <TableHead className="w-40">Progress</TableHead>
                   <TableHead>Last activity</TableHead>
-                  {data?.canManage && (
+                  {data?.canRemove && (
                     <TableHead className="w-10 pr-4">
                       <span className="sr-only">Actions</span>
                     </TableHead>
@@ -243,9 +245,11 @@ export default function JudgesPage() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <TrackBadges ids={j.trackIds} names={trackName} />
-                      </TableCell>
+                      {EVENT_TRACKS_ENABLED && (
+                        <TableCell>
+                          <TrackBadges ids={j.trackIds} names={trackName} />
+                        </TableCell>
+                      )}
                       <TableCell className="text-right tabular-nums">{j.assigned}</TableCell>
                       <TableCell className="text-right tabular-nums">{j.scored}</TableCell>
                       <TableCell>
@@ -270,7 +274,7 @@ export default function JudgesPage() {
                       >
                         {j.lastScoredAt ? relativeTime(j.lastScoredAt) : "—"}
                       </TableCell>
-                      {data?.canManage && (
+                      {data?.canRemove && (
                         <TableCell className="pr-4">
                           <DropdownMenu>
                             <DropdownMenuTrigger
@@ -285,10 +289,14 @@ export default function JudgesPage() {
                               <MoreHorizontal />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => setEditing(j)}>
-                                <Tags /> Edit tracks
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
+                              {EVENT_TRACKS_ENABLED && (
+                                <>
+                                  <DropdownMenuItem onClick={() => setEditing(j)}>
+                                    <Tags /> Edit tracks
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                </>
+                              )}
                               <DropdownMenuItem
                                 variant="destructive"
                                 onClick={() => setRemoving(j)}
@@ -308,7 +316,7 @@ export default function JudgesPage() {
         </Card>
       )}
 
-      {data?.canManage && data.invites.length > 0 && (
+      {data?.canInvite && data.invites.length > 0 && (
         <Section
           title="Pending invitations"
           description="Juryza runs without an email server — share each link with its judge. A link only works for the address it was issued to."
@@ -324,17 +332,19 @@ export default function JudgesPage() {
                       Invited {relativeTime(i.createdAt)}
                     </p>
                   </div>
-                  <TrackBadges ids={i.trackIds} names={trackName} />
+                  {EVENT_TRACKS_ENABLED && <TrackBadges ids={i.trackIds} names={trackName} />}
                   <CopyButton value={i.inviteUrl} label="Copy link" />
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Revoke invitation for ${i.email}`}
-                    disabled={remove.isPending && remove.variables === i.id}
-                    onClick={() => remove.mutate(i.id)}
-                  >
-                    <Trash2 />
-                  </Button>
+                  {data.canRemove && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Revoke invitation for ${i.email}`}
+                      disabled={remove.isPending && remove.variables === i.id}
+                      onClick={() => remove.mutate(i.id)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -342,7 +352,7 @@ export default function JudgesPage() {
         </Section>
       )}
 
-      {data?.canManage && (
+      {data?.canInvite && (
         <InviteDialog
           slug={slug}
           open={inviteOpen}
@@ -352,7 +362,7 @@ export default function JudgesPage() {
         />
       )}
 
-      {data?.canManage && editing && (
+      {EVENT_TRACKS_ENABLED && data?.canRemove && editing && (
         <TracksDialog
           key={editing.id}
           slug={slug}
@@ -364,7 +374,7 @@ export default function JudgesPage() {
       )}
 
       <AlertDialog
-        open={data?.canManage === true && removing !== null}
+        open={data?.canRemove === true && removing !== null}
         onOpenChange={(o) => !o && setRemoving(null)}
       >
         <AlertDialogContent>
@@ -534,7 +544,9 @@ function InviteDialog({
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
-            <TrackPicker tracks={tracks} value={trackIds} onChange={setTrackIds} />
+            {EVENT_TRACKS_ENABLED && (
+              <TrackPicker tracks={tracks} value={trackIds} onChange={setTrackIds} />
+            )}
           </form>
         )}
         <DialogFooter>

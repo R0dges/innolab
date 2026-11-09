@@ -65,7 +65,7 @@ const DATASETS: {
   {
     key: "projects",
     label: "Projects",
-    body: "Every project with track, links, tags and status.",
+    body: "Every project with links, tags and status.",
     icon: FolderKanban,
   },
   {
@@ -193,8 +193,8 @@ export default function DataPage() {
               <Package className="size-4" /> Full event bundle
             </CardTitle>
             <CardDescription>
-              One JSON file with the event, tracks, rubric, prizes, judges, teams, projects, scores
-              and pairwise comparisons. It uses the same shape as the DOGFOOD{" "}
+              One JSON file with the event, rubric, prizes, judges, teams, projects, scores and
+              pairwise comparisons. It uses the same shape as the DOGFOOD{" "}
               <code className="font-mono">fixtures.json</code>, so it round-trips: export here,
               import on another Juryza instance.
             </CardDescription>

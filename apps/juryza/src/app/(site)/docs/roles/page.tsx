@@ -287,8 +287,8 @@ export default function RolesDocsPage() {
                 <li className="flex items-start gap-2">
                   <XCircle className="size-3.5 text-destructive shrink-0 mt-0.5" />
                   <span>
-                    <strong>No Arbitrary Editing:</strong> Cannot modify rubrics, weights, track
-                    limits, or project code
+                    <strong>No Arbitrary Editing:</strong> Cannot modify rubrics, weights, or
+                    project code
                   </span>
                 </li>
               </ul>
@@ -319,11 +319,11 @@ export default function RolesDocsPage() {
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                  <span>Define tracks, prize pools, and weighted custom scoring criteria</span>
+                  <span>Define prize pools and weighted custom scoring criteria</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                  <span>Invite panel judges and restrict judges to specific expertise tracks</span>
+                  <span>Invite the panel judges who will evaluate the assigned projects</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0 mt-0.5" />
@@ -341,9 +341,7 @@ export default function RolesDocsPage() {
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                  <span>
-                    Assign podium positions, track prizes, and publish results to lock judging data
-                  </span>
+                  <span>Assign podium positions and publish results to lock judging data</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0 mt-0.5" />
@@ -495,9 +493,9 @@ export default function RolesDocsPage() {
             <p className="text-muted-foreground leading-relaxed">
               <strong className="text-foreground">Assigned</strong> means judges cannot pick and
               choose which projects to evaluate. Projects must be explicitly assigned to that judge
-              by the organizer or the automated review balancing algorithm. Judges only score within
-              their permitted tracks and where zero conflict of interest exists. Even organizers and
-              admins acting as judges only score their assigned queue.
+              by the organizer or the automated review balancing algorithm. Conflict-of-interest
+              rules still apply. Even organizers and admins acting as judges only score their
+              assigned queue.
             </p>
           </div>
 
@@ -682,7 +680,7 @@ export default function RolesDocsPage() {
                 </TableCell>
               </TableRow>
               <TableRow>
-                <TableCell className="font-medium">Edit event tracks, rubrics & timeline</TableCell>
+                <TableCell className="font-medium">Edit event rubric, rewards & timeline</TableCell>
                 <TableCell className="text-center">
                   <Minus className="size-4 text-muted-foreground/40 mx-auto" />
                 </TableCell>

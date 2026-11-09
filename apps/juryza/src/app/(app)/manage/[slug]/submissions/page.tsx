@@ -68,6 +68,7 @@ import { cn } from "@juryza/ui/lib/utils";
 
 import { api } from "@/lib/api";
 import { formatDateTime, formatNumber, relativeTime } from "@/lib/format";
+import { EVENT_TRACKS_ENABLED } from "@/lib/platform";
 import { eventKey, useEvent } from "@/lib/queries";
 
 /** A row of the `projects` export (JSON form). */
@@ -256,7 +257,7 @@ export default function SubmissionsPage() {
                   <TableRow>
                     <TableHead>Project</TableHead>
                     <TableHead>Team</TableHead>
-                    <TableHead>Track</TableHead>
+                    {EVENT_TRACKS_ENABLED && <TableHead>Track</TableHead>}
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Submitted</TableHead>
                     <TableHead className="text-right">Links</TableHead>
@@ -297,13 +298,15 @@ export default function SubmissionsPage() {
                         <TableCell className="whitespace-nowrap">
                           {p.team ?? <span className="text-muted-foreground">—</span>}
                         </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          {p.track ? (
-                            <Badge variant="outline">{p.track}</Badge>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
+                        {EVENT_TRACKS_ENABLED && (
+                          <TableCell className="whitespace-nowrap">
+                            {p.track ? (
+                              <Badge variant="outline">{p.track}</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        )}
                         <TableCell>
                           <Badge
                             variant={p.status === "submitted" ? "default" : "secondary"}

@@ -57,3 +57,32 @@ export function innolabScheduleIssue(value: InnolabSchedule): string | null {
   }
   return null;
 }
+
+type JudgingSchedule = {
+  submissionsClose?: Date | string | null;
+  judgingOpen?: Date | string | null;
+  judgingClose?: Date | string | null;
+};
+
+/** Returns a user-facing issue when the private jury window is inconsistent. */
+export function judgingScheduleIssue(value: JudgingSchedule): string | null {
+  const time = (date: Date | string | null | undefined) => (date ? new Date(date).getTime() : null);
+  const projectsClose = time(value.submissionsClose);
+  const judgingOpen = time(value.judgingOpen);
+  const judgingClose = time(value.judgingClose);
+  if (judgingOpen !== null && projectsClose !== null && judgingOpen < projectsClose) {
+    return "Project judging must open at or after the project submission deadline";
+  }
+  if (judgingOpen !== null && judgingClose !== null && judgingClose <= judgingOpen) {
+    return "Project judging must close after it opens";
+  }
+  if (
+    judgingOpen === null &&
+    projectsClose !== null &&
+    judgingClose !== null &&
+    judgingClose <= projectsClose
+  ) {
+    return "Project judging must close after the project submission deadline";
+  }
+  return null;
+}
